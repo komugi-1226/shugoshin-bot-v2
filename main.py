@@ -95,15 +95,15 @@ async def setup_error(interaction: discord.Interaction, error: app_commands.AppC
         await interaction.response.send_message(f"設定中にエラーが発生しました: {error}", ephemeral=True)
 
 
-# ★★★★★★★ ここからが日本語化された /report コマンド ★★★★★★★
+# ★★★★★★★ ここが超進化した /report コマンド ★★★★★★★
 @tree.command(name="report", description="サーバーのルール違反を匿名で管理者に報告します。")
 @app_commands.describe(
-    target_user="報告したい相手",
-    violated_rule="違反したと思われるルール",
-    urgency="報告の緊急度を選択してください。",
-    keikoku_suru="対象者に警告を発行しますか？（管理者と対象者のみが見れる場所で行われます）",
-    details="（「その他」を選んだ場合は必須）具体的な状況を教えてください。",
-    message_link="証拠となるメッセージのリンク（任意）"
+    target_user="① 報告したい相手を選んでね",
+    violated_rule="② 違反したルールを選んでね",
+    urgency="③ 緊急度を選んでね",
+    keikoku_suru="④ 相手に警告する？（管理者と本人だけが見える場所でメンションします）",
+    details="⑤ 詳しい状況を書いてね（『その他』を選んだ場合は必須だよ）",
+    message_link="⑥ 証拠になるメッセージのリンクがあれば貼ってね"
 )
 @app_commands.choices(
     violated_rule=[
@@ -120,8 +120,8 @@ async def setup_error(interaction: discord.Interaction, error: app_commands.AppC
         app_commands.Choice(name="高：即座の対応が必要", value="高"),
     ],
     keikoku_suru=[
-        app_commands.Choice(name="はい (※タイミングから通報者が推測される可能性があります)", value="yes"),
-        app_commands.Choice(name="いいえ", value="no"),
+        app_commands.Choice(name="はい（相手に通知がいきます ※匿名性が少し下がります）", value="yes"),
+        app_commands.Choice(name="いいえ（管理者だけに報告します）", value="no"),
     ]
 )
 async def report(
@@ -129,7 +129,7 @@ async def report(
     target_user: discord.User,
     violated_rule: app_commands.Choice[str],
     urgency: app_commands.Choice[str],
-    keikoku_suru: app_commands.Choice[str], # 引数名と型を変更
+    keikoku_suru: app_commands.Choice[str],
     details: str = None,
     message_link: str = None
 ):
@@ -155,7 +155,7 @@ async def report(
         )
         await view.wait()
         if not view.confirmed:
-            return # キャンセルされたので処理を中断
+            return
         issue_warning_confirmed = True
     
     try:
@@ -206,16 +206,13 @@ async def report(
             await report_channel.send(warning_message)
             final_message = "通報と警告発行を受け付けました。ご協力ありがとうございます。"
 
-        # 既に確認メッセージに edit_message を使っているので、最後の応答は followup.send で行う
         if interaction.is_expired():
              await interaction.followup.send(final_message, ephemeral=True)
         else:
              if issue_warning_confirmed:
-                # view.wait()の後のinteractionは編集済みなので、followupを使う
-                await interaction.followup.send(final_message, ephemeral=True)
-             else:
-                # 警告なしの場合は、最初のdeferを編集できる
                 await interaction.edit_original_response(content=final_message, view=None)
+             else:
+                await interaction.followup.send(final_message, ephemeral=True)
 
     except Exception as e:
         logging.error(f"通報処理中にエラー: {e}", exc_info=True)
@@ -223,15 +220,16 @@ async def report(
             await interaction.edit_original_response(content=f"不明なエラーが発生しました: {e}", view=None)
 
 
-# (/reportmanage グループとサブコマンドは変更なし)
+# (/reportmanage グループとサブコマンドはVer1.2から変更なし)
 report_manage_group = app_commands.Group(name="reportmanage", description="報告を管理します。")
-# (status, list, stats のコードをここにペースト)
 
 @report_manage_group.command(name="status", description="報告のステータスを変更します。")
 @app_commands.describe(report_id="ステータスを変更したい報告のID", new_status="新しいステータス")
 @app_commands.choices(new_status=[app_commands.Choice(name="対応中", value="対応中"), app_commands.Choice(name="解決済み", value="解決済み"), app_commands.Choice(name="却下", value="却下"),])
 async def status(interaction: discord.Interaction, report_id: int, new_status: app_commands.Choice[str]):
     await interaction.response.defer(ephemeral=True)
+    settings = await db.get_guild_settings(interaction.guild.id)
+    if not settings: return await interaction.followup.send("未設定です。`/setup`を実行してください。", ephemeral=True)
     try:
         report_data = await db.get_report(report_id)
         if not report_data:
