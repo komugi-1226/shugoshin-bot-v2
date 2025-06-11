@@ -1,0 +1,1 @@
+# shugoshin-bot-v2
