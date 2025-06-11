@@ -64,7 +64,7 @@ class ConfirmWarningView(ui.View):
         self.confirmed = False
         for item in self.children:
             item.disabled = True
-        await interaction.response.edit_message(content="警告の発行をキャンセルしました。", view=self)
+        await interaction.response.edit_message(content="警告の発行をキャンセルしました。", view=None)
         self.stop()
 
 # --- スラッシュコマンド ---
@@ -77,10 +77,8 @@ class ConfirmWarningView(ui.View):
 )
 async def setup(interaction: discord.Interaction, report_channel: discord.TextChannel, urgent_role: discord.Role = None):
     await interaction.response.defer(ephemeral=True)
-    
     role_id = urgent_role.id if urgent_role else None
     await db.setup_guild(interaction.guild.id, report_channel.id, role_id)
-    
     role_mention = urgent_role.mention if urgent_role else "未設定"
     await interaction.followup.send(
         f"✅ 設定を保存しました。\n"
@@ -97,12 +95,13 @@ async def setup_error(interaction: discord.Interaction, error: app_commands.AppC
         await interaction.response.send_message(f"設定中にエラーが発生しました: {error}", ephemeral=True)
 
 
+# ★★★★★★★ ここからが日本語化された /report コマンド ★★★★★★★
 @tree.command(name="report", description="サーバーのルール違反を匿名で管理者に報告します。")
 @app_commands.describe(
     target_user="報告したい相手",
     violated_rule="違反したと思われるルール",
     urgency="報告の緊急度を選択してください。",
-    issue_warning="対象者に警告を発行しますか？（管理者と対象者のみが見れる場所で行われます）",
+    keikoku_suru="対象者に警告を発行しますか？（管理者と対象者のみが見れる場所で行われます）",
     details="（「その他」を選んだ場合は必須）具体的な状況を教えてください。",
     message_link="証拠となるメッセージのリンク（任意）"
 )
@@ -119,6 +118,10 @@ async def setup_error(interaction: discord.Interaction, error: app_commands.AppC
         app_commands.Choice(name="低：通常の違反報告", value="低"),
         app_commands.Choice(name="中：早めの対応が必要", value="中"),
         app_commands.Choice(name="高：即座の対応が必要", value="高"),
+    ],
+    keikoku_suru=[
+        app_commands.Choice(name="はい (※タイミングから通報者が推測される可能性があります)", value="yes"),
+        app_commands.Choice(name="いいえ", value="no"),
     ]
 )
 async def report(
@@ -126,7 +129,7 @@ async def report(
     target_user: discord.User,
     violated_rule: app_commands.Choice[str],
     urgency: app_commands.Choice[str],
-    issue_warning: bool,
+    keikoku_suru: app_commands.Choice[str], # 引数名と型を変更
     details: str = None,
     message_link: str = None
 ):
@@ -142,7 +145,8 @@ async def report(
         await interaction.followup.send(f"クールダウン中です。あと `{int(remaining_time // 60)}分 {int(remaining_time % 60)}秒` 待ってください。", ephemeral=True)
         return
 
-    if issue_warning:
+    issue_warning_confirmed = False
+    if keikoku_suru.value == "yes":
         view = ConfirmWarningView(interaction=interaction)
         await interaction.followup.send(
             "⚠️ **警告:** 対象者に報告用チャンネルでメンションして警告を発行します。"
@@ -151,7 +155,8 @@ async def report(
         )
         await view.wait()
         if not view.confirmed:
-            return
+            return # キャンセルされたので処理を中断
+        issue_warning_confirmed = True
     
     try:
         report_id = await db.create_report(
@@ -187,7 +192,7 @@ async def report(
         await db.update_report_message_id(report_id, sent_message.id)
 
         final_message = "通報を受け付けました。ご協力ありがとうございます。"
-        if issue_warning:
+        if issue_warning_confirmed:
             warning_message = (
                 f"{target_user.mention}\n\n"
                 f"⚠️ **サーバー管理者からのお知らせです** ⚠️\n"
@@ -201,10 +206,16 @@ async def report(
             await report_channel.send(warning_message)
             final_message = "通報と警告発行を受け付けました。ご協力ありがとうございます。"
 
+        # 既に確認メッセージに edit_message を使っているので、最後の応答は followup.send で行う
         if interaction.is_expired():
-            await interaction.followup.send(final_message, ephemeral=True)
+             await interaction.followup.send(final_message, ephemeral=True)
         else:
-            await interaction.edit_original_response(content=final_message, view=None)
+             if issue_warning_confirmed:
+                # view.wait()の後のinteractionは編集済みなので、followupを使う
+                await interaction.followup.send(final_message, ephemeral=True)
+             else:
+                # 警告なしの場合は、最初のdeferを編集できる
+                await interaction.edit_original_response(content=final_message, view=None)
 
     except Exception as e:
         logging.error(f"通報処理中にエラー: {e}", exc_info=True)
@@ -212,9 +223,73 @@ async def report(
             await interaction.edit_original_response(content=f"不明なエラーが発生しました: {e}", view=None)
 
 
-# (/reportmanage グループとサブコマンドはVer1.2から変更なし)
+# (/reportmanage グループとサブコマンドは変更なし)
 report_manage_group = app_commands.Group(name="reportmanage", description="報告を管理します。")
-# ... (status, list, stats のコードをここにペースト) ...
+# (status, list, stats のコードをここにペースト)
+
+@report_manage_group.command(name="status", description="報告のステータスを変更します。")
+@app_commands.describe(report_id="ステータスを変更したい報告のID", new_status="新しいステータス")
+@app_commands.choices(new_status=[app_commands.Choice(name="対応中", value="対応中"), app_commands.Choice(name="解決済み", value="解決済み"), app_commands.Choice(name="却下", value="却下"),])
+async def status(interaction: discord.Interaction, report_id: int, new_status: app_commands.Choice[str]):
+    await interaction.response.defer(ephemeral=True)
+    try:
+        report_data = await db.get_report(report_id)
+        if not report_data:
+            await interaction.followup.send(f"エラー: 報告ID `{report_id}` が見つかりません。", ephemeral=True)
+            return
+        report_channel = client.get_channel(settings['report_channel_id'])
+        original_message = await report_channel.fetch_message(report_data['message_id'])
+        original_embed = original_message.embeds[0]
+        status_colors = {"対応中": discord.Color.yellow(), "解決済み": discord.Color.green(), "却下": discord.Color.greyple()}
+        original_embed.color = status_colors.get(new_status.value)
+        for i, field in enumerate(original_embed.fields):
+            if field.name == "📊 ステータス":
+                original_embed.set_field_at(i, name="📊 ステータス", value=new_status.value, inline=False)
+                break
+        await original_message.edit(embed=original_embed)
+        await db.update_report_status(report_id, new_status.value)
+        await interaction.followup.send(f"報告ID `{report_id}` のステータスを「{new_status.value}」に変更しました。", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"ステータス更新中にエラー: {e}", ephemeral=True)
+
+@report_manage_group.command(name="list", description="報告の一覧を表示します。")
+@app_commands.describe(filter="表示するステータスで絞り込みます。")
+@app_commands.choices(filter=[app_commands.Choice(name="すべて", value="all"), app_commands.Choice(name="未対応", value="未対応"), app_commands.Choice(name="対応中", value="対応中"),])
+async def list_reports_cmd(interaction: discord.Interaction, filter: app_commands.Choice[str] = None):
+    await interaction.response.defer(ephemeral=True)
+    status_filter = filter.value if filter else None
+    reports = await db.list_reports(status_filter)
+    if not reports:
+        await interaction.followup.send("該当する報告はありません。", ephemeral=True)
+        return
+    embed = discord.Embed(title=f"📜 報告リスト ({filter.name if filter else '最新'})", color=discord.Color.blue())
+    description = ""
+    for report in reports:
+        try:
+            target_user = await client.fetch_user(report['target_user_id'])
+            user_name = target_user.name
+        except discord.NotFound:
+            user_name = "不明なユーザー"
+        description += f"**ID: {report['report_id']}** | 対象: {user_name} | ステータス: `{report['status']}`\n"
+    embed.description = description
+    await interaction.followup.send(embed=embed, ephemeral=True)
+
+@report_manage_group.command(name="stats", description="報告の統計情報を表示します。")
+async def stats(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    stats_data = await db.get_report_stats()
+    total = sum(stats_data.values())
+    embed = discord.Embed(title="📈 報告統計", description=f"総報告数: **{total}** 件", color=discord.Color.purple())
+    unhandled = stats_data.get('未対応', 0)
+    in_progress = stats_data.get('対応中', 0)
+    resolved = stats_data.get('解決済み', 0)
+    rejected = stats_data.get('却下', 0)
+    embed.add_field(name="未対応 🔴", value=f"**{unhandled}** 件", inline=True)
+    embed.add_field(name="対応中 🟡", value=f"**{in_progress}** 件", inline=True)
+    embed.add_field(name="解決済み 🟢", value=f"**{resolved}** 件", inline=True)
+    embed.add_field(name="却下 ⚪", value=f"**{rejected}** 件", inline=True)
+    await interaction.followup.send(embed=embed, ephemeral=True)
+
 
 # --- 起動処理 ---
 def main():
