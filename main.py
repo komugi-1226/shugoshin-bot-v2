@@ -19,6 +19,8 @@ REPORT_BUTTON_CHANNEL_ID = 1382351852825346048  # ボタン式報告専用チャ
 
 # --- Discord Botの準備 ---
 intents = discord.Intents.default()
+intents.members = True  # サーバーメンバー情報の取得に必要
+intents.guilds = True   # ギルド情報の取得に必要
 client = discord.Client(intents=intents)
 tree = app_commands.CommandTree(client)
 
@@ -297,15 +299,20 @@ class UserInputModal(ui.Modal):
                 
                 await interaction.edit_original_response(embed=embed, view=view)
             else:
-                # 検索に失敗した場合の詳細情報
+                # 検索に失敗した場合の詳細診断情報
                 guild = interaction.guild
-                member_count = len(guild.members)
+                member_count = guild.member_count  # Discord公式メンバー数
+                member_list = [member for member in guild.members]  # 実際に取得できたメンバー
+                member_list_count = len(member_list)
+                
+                # Intent設定の確認
+                intents_status = f"members:{client.intents.members}, guilds:{client.intents.guilds}"
                 
                 # 類似ユーザー名を探す（最大5件）
                 similar_users = []
                 search_term = user_input_text.lower()
                 
-                for member in guild.members:
+                for member in member_list:
                     member_name = member.name.lower()
                     member_display = member.display_name.lower()
                     
@@ -317,7 +324,20 @@ class UserInputModal(ui.Modal):
                             break
                 
                 error_message = f"❌ 「{user_input_text}」に一致するユーザーが見つかりませんでした。\n\n"
-                error_message += f"**サーバー情報:**\n• 総メンバー数: {member_count}人\n\n"
+                error_message += f"**サーバー診断:**\n"
+                error_message += f"• Discord公式メンバー数: {member_count}人\n"
+                error_message += f"• 実際に取得できた数: {member_list_count}人\n"
+                error_message += f"• Intent設定: {intents_status}\n\n"
+                
+                # メンバー数が異常に少ない場合の警告
+                if member_list_count == 1:
+                    error_message += "⚠️ **メンバー情報取得エラー**\n"
+                    error_message += "Discord Developer Portalで以下を確認してください：\n"
+                    error_message += "1. SERVER MEMBERS INTENTが有効か\n"
+                    error_message += "2. GUILDS INTENTが有効か\n\n"
+                elif member_list_count < member_count * 0.5:  # 半分以下の場合
+                    error_message += "⚠️ **メンバー情報が不完全**\n"
+                    error_message += "一部のメンバー情報が取得できていません。\n\n"
                 
                 if similar_users:
                     error_message += "**類似するユーザー名:**\n" + "\n".join(similar_users) + "\n\n"
@@ -728,6 +748,91 @@ async def debug_channel_error(interaction: discord.Interaction, error: app_comma
     else:
         await interaction.response.send_message(f"デバッグ中にエラーが発生しました: {error}", ephemeral=True)
 
+@tree.command(name="debug_members", description="【管理者用】サーバーメンバー情報をデバッグ表示します。")
+@app_commands.checks.has_permissions(administrator=True)
+async def debug_members(interaction: discord.Interaction):
+    """サーバーメンバー情報をデバッグ表示するコマンド"""
+    await interaction.response.defer(ephemeral=True)
+    
+    guild = interaction.guild
+    if not guild:
+        await interaction.followup.send("❌ サーバー情報を取得できませんでした", ephemeral=True)
+        return
+    
+    # サーバーメンバー情報を取得
+    member_count = guild.member_count  # Discordが報告する公式メンバー数
+    member_list = [member for member in guild.members]  # 実際に取得できたメンバーリスト
+    member_list_count = len(member_list)
+    
+    # ボットとユーザーの分類
+    bot_members = [member for member in member_list if member.bot]
+    user_members = [member for member in member_list if not member.bot]
+    
+    # Intent設定の確認
+    intents_info = f"members: {client.intents.members}, guilds: {client.intents.guilds}"
+    
+    embed = discord.Embed(
+        title="🔍 サーバーメンバー情報デバッグ",
+        color=discord.Color.green()
+    )
+    embed.add_field(name="サーバー名", value=guild.name, inline=False)
+    embed.add_field(name="サーバーID", value=f"`{guild.id}`", inline=False)
+    embed.add_field(name="Discord公式メンバー数", value=f"{member_count} 人", inline=True)
+    embed.add_field(name="実際に取得できた数", value=f"{member_list_count} 人", inline=True)
+    embed.add_field(name="　", value="　", inline=True)  # 空白で改行
+    embed.add_field(name="ユーザー数", value=f"{len(user_members)} 人", inline=True)
+    embed.add_field(name="ボット数", value=f"{len(bot_members)} 人", inline=True)
+    embed.add_field(name="　", value="　", inline=True)  # 空白で改行
+    embed.add_field(name="Intent設定", value=intents_info, inline=False)
+    
+    # 診断結果
+    if member_list_count == 1:
+        embed.add_field(
+            name="⚠️ 診断結果",
+            value="メンバー情報を正常に取得できていません。\n"
+                  "Discord Developer Portalで以下を確認してください：\n"
+                  "1. SERVER MEMBERS INTENTが有効になっているか\n"
+                  "2. GUILDS INTENTが有効になっているか",
+            inline=False
+        )
+    elif member_list_count < member_count:
+        embed.add_field(
+            name="⚠️ 診断結果",
+            value="一部のメンバー情報が取得できていません。\n"
+                  "大規模サーバーの場合、全メンバーの取得には時間がかかる場合があります。",
+            inline=False
+        )
+    else:
+        embed.add_field(
+            name="✅ 診断結果",
+            value="メンバー情報は正常に取得できています。",
+            inline=False
+        )
+    
+    # 最初の10人のメンバーリスト（デバッグ用）
+    if member_list:
+        member_names = []
+        for i, member in enumerate(member_list[:10]):
+            member_type = "🤖" if member.bot else "👤"
+            member_names.append(f"{member_type} {member.display_name}")
+            if i >= 9:  # 10人まで
+                break
+        
+        embed.add_field(
+            name=f"メンバー例（最初の{min(10, len(member_list))}人）",
+            value="\n".join(member_names) if member_names else "なし",
+            inline=False
+        )
+    
+    await interaction.followup.send(embed=embed, ephemeral=True)
+
+@debug_members.error
+async def debug_members_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    if isinstance(error, app_commands.MissingPermissions):
+        await interaction.response.send_message("このコマンドはサーバーの管理者のみが実行できます。", ephemeral=True)
+    else:
+        await interaction.response.send_message(f"メンバーデバッグ中にエラーが発生しました: {error}", ephemeral=True)
+        
 # ★★★★★★★ ここが超進化した /report コマンド ★★★★★★★
 @tree.command(name="report", description="サーバーのルール違反を匿名で管理者に報告します。")
 @app_commands.describe(
