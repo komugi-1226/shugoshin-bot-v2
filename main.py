@@ -128,7 +128,7 @@ class ReportStartView(ui.View):
     def __init__(self):
         super().__init__(timeout=None)  # 永続化
 
-    @ui.button(label="📝 報告を開始する", style=discord.ButtonStyle.primary, emoji="🛡️")
+    @ui.button(label="📝 報告を開始する", style=discord.ButtonStyle.primary, emoji="🛡️", custom_id="report_start_button")
     async def start_report(self, interaction: discord.Interaction, button: ui.Button):
         # クールダウンチェック
         remaining_time = await db.check_cooldown(interaction.user.id, COOLDOWN_MINUTES * 60)
