@@ -50,34 +50,48 @@ async def setup_report_button():
     """報告用ボタンを特定のチャンネルに設置する"""
     try:
         channel = client.get_channel(REPORT_BUTTON_CHANNEL_ID)
-        if channel:
-            # 既存のボタンメッセージを探す（新しいメッセージを無限に作らないように）
-            async for message in channel.history(limit=50):
-                if message.author == client.user and message.embeds:
-                    embed = message.embeds[0]
-                    if embed.title and "報告システム" in embed.title:
-                        # 既存のボタンメッセージがあるので、新しく作らない
-                        logging.info("既存の報告ボタンが見つかりました")
-                        return
+        if not channel:
+            logging.error(f"チャンネルID {REPORT_BUTTON_CHANNEL_ID} が見つかりません")
+            return
             
-            # 新しい報告ボタンメッセージを作成
-            embed = discord.Embed(
-                title="🛡️ 守護神ボット 報告システム",
-                description="サーバーのルール違反を匿名で管理者に報告できます。\n下のボタンをクリックして報告を開始してください。",
-                color=discord.Color.blue()
-            )
-            embed.add_field(
-                name="📋 報告の流れ", 
-                value="① 報告開始ボタンをクリック\n② 対象者を選択\n③ 違反ルールを選択\n④ 緊急度を選択\n⑤ 詳細情報を入力\n⑥ 最終確認・送信", 
-                inline=False
-            )
-            embed.set_footer(text="報告は完全に匿名で処理されます")
+        logging.info(f"チャンネル '{channel.name}' (ID: {channel.id}) への報告ボタン設置を試行中...")
+        
+        # ボットの権限チェック
+        permissions = channel.permissions_for(channel.guild.me)
+        if not permissions.send_messages:
+            logging.error(f"チャンネル '{channel.name}' にメッセージ送信権限がありません")
+            return
             
-            view = ReportStartView()
-            await channel.send(embed=embed, view=view)
-            logging.info("報告用ボタンを設置しました")
+        # 既存のボタンメッセージを探す（新しいメッセージを無限に作らないように）
+        async for message in channel.history(limit=50):
+            if message.author == client.user and message.embeds:
+                embed = message.embeds[0]
+                if embed.title and "報告システム" in embed.title:
+                    # 既存のボタンメッセージがあるので、新しく作らない
+                    logging.info(f"既存の報告ボタンが見つかりました (メッセージID: {message.id})")
+                    return
+        
+        # 新しい報告ボタンメッセージを作成
+        embed = discord.Embed(
+            title="🛡️ 守護神ボット 報告システム",
+            description="サーバーのルール違反を匿名で管理者に報告できます。\n下のボタンをクリックして報告を開始してください。",
+            color=discord.Color.blue()
+        )
+        embed.add_field(
+            name="📋 報告の流れ", 
+            value="① 報告開始ボタンをクリック\n② 対象者を選択\n③ 違反ルールを選択\n④ 緊急度を選択\n⑤ 詳細情報を入力\n⑥ 最終確認・送信", 
+            inline=False
+        )
+        embed.set_footer(text="報告は完全に匿名で処理されます")
+        
+        view = ReportStartView()
+        sent_message = await channel.send(embed=embed, view=view)
+        logging.info(f"報告用ボタンを設置しました (メッセージID: {sent_message.id})")
+        
+    except discord.Forbidden:
+        logging.error(f"チャンネルID {REPORT_BUTTON_CHANNEL_ID} にメッセージを送信する権限がありません")
     except Exception as e:
-        logging.error(f"報告ボタンの設置に失敗: {e}")
+        logging.error(f"報告ボタンの設置に失敗: {e}", exc_info=True)
 
 # --- 確認ボタン付きView ---
 class ConfirmWarningView(ui.View):
@@ -509,15 +523,21 @@ async def setup_error(interaction: discord.Interaction, error: app_commands.AppC
 
 @tree.command(name="setup_report_button", description="【管理者用】報告ボタンを再設置します。")
 @app_commands.checks.has_permissions(administrator=True)
-@app_commands.describe(channel="ボタンを設置するチャンネル（指定しない場合は設定済みのチャンネル）")
+@app_commands.describe(channel="ボタンを設置するチャンネル（指定しない場合は現在のチャンネル）")
 async def setup_report_button_command(interaction: discord.Interaction, channel: discord.TextChannel = None):
     """報告ボタンを手動で設置するコマンド"""
     await interaction.response.defer(ephemeral=True)
     
-    target_channel = channel if channel else client.get_channel(REPORT_BUTTON_CHANNEL_ID)
+    # チャンネルが指定されていない場合は現在のチャンネルを使用
+    target_channel = channel if channel else interaction.channel
     
     if not target_channel:
         await interaction.followup.send("❌ チャンネルが見つかりません。", ephemeral=True)
+        return
+    
+    # ボットがメッセージを送信する権限があるかチェック
+    if not target_channel.permissions_for(interaction.guild.me).send_messages:
+        await interaction.followup.send(f"❌ {target_channel.mention} にメッセージを送信する権限がありません。", ephemeral=True)
         return
     
     try:
@@ -534,11 +554,22 @@ async def setup_report_button_command(interaction: discord.Interaction, channel:
         embed.set_footer(text="報告は完全に匿名で処理されます")
         
         view = ReportStartView()
-        await target_channel.send(embed=embed, view=view)
+        sent_message = await target_channel.send(embed=embed, view=view)
         
-        await interaction.followup.send(f"✅ 報告ボタンを {target_channel.mention} に設置しました。", ephemeral=True)
+        await interaction.followup.send(
+            f"✅ 報告ボタンを {target_channel.mention} に設置しました。\n"
+            f"**メッセージID:** {sent_message.id}\n"
+            f"**チャンネルID:** {target_channel.id}", 
+            ephemeral=True
+        )
         
+        # 設置されたチャンネルIDをログに出力
+        logging.info(f"報告ボタンを設置: チャンネル={target_channel.name}({target_channel.id})")
+        
+    except discord.Forbidden:
+        await interaction.followup.send(f"❌ {target_channel.mention} にメッセージを送信する権限がありません。", ephemeral=True)
     except Exception as e:
+        logging.error(f"ボタン設置エラー: {e}")
         await interaction.followup.send(f"❌ ボタンの設置に失敗しました: {e}", ephemeral=True)
 
 @setup_report_button_command.error
@@ -547,6 +578,41 @@ async def setup_report_button_error(interaction: discord.Interaction, error: app
         await interaction.response.send_message("このコマンドはサーバーの管理者のみが実行できます。", ephemeral=True)
     else:
         await interaction.response.send_message(f"ボタン設置中にエラーが発生しました: {error}", ephemeral=True)
+
+@tree.command(name="debug_channel", description="【管理者用】現在のチャンネル情報を表示します。")
+@app_commands.checks.has_permissions(administrator=True)
+async def debug_channel(interaction: discord.Interaction):
+    """チャンネル情報をデバッグ表示するコマンド"""
+    await interaction.response.defer(ephemeral=True)
+    
+    channel = interaction.channel
+    embed = discord.Embed(
+        title="🔍 チャンネル情報",
+        color=discord.Color.blue()
+    )
+    embed.add_field(name="チャンネル名", value=channel.name, inline=False)
+    embed.add_field(name="チャンネルID", value=f"`{channel.id}`", inline=False)
+    embed.add_field(name="設定済みID", value=f"`{REPORT_BUTTON_CHANNEL_ID}`", inline=False)
+    embed.add_field(name="IDの一致", value="✅ 一致" if channel.id == REPORT_BUTTON_CHANNEL_ID else "❌ 不一致", inline=False)
+    
+    # ボットの権限チェック
+    permissions = channel.permissions_for(interaction.guild.me)
+    embed.add_field(
+        name="ボットの権限",
+        value=f"メッセージ送信: {'✅' if permissions.send_messages else '❌'}\n"
+              f"埋め込みリンク: {'✅' if permissions.embed_links else '❌'}\n"
+              f"ファイル添付: {'✅' if permissions.attach_files else '❌'}",
+        inline=False
+    )
+    
+    await interaction.followup.send(embed=embed, ephemeral=True)
+
+@debug_channel.error
+async def debug_channel_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    if isinstance(error, app_commands.MissingPermissions):
+        await interaction.response.send_message("このコマンドはサーバーの管理者のみが実行できます。", ephemeral=True)
+    else:
+        await interaction.response.send_message(f"デバッグ中にエラーが発生しました: {error}", ephemeral=True)
 
 # ★★★★★★★ ここが超進化した /report コマンド ★★★★★★★
 @tree.command(name="report", description="サーバーのルール違反を匿名で管理者に報告します。")
