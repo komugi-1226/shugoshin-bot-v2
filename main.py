@@ -253,20 +253,35 @@ class UserInputModal(ui.Modal):
                 guild = interaction.guild
                 search_term = user_input_text.lower()
                 
+                # 候補者を格納するリスト
+                exact_matches = []    # 完全一致
+                partial_matches = []  # 部分一致
+                
                 # サーバーメンバーから検索
                 for member in guild.members:
-                    # ユーザー名（username）で一致チェック
-                    if member.name.lower() == search_term:
-                        target_user = member
-                        break
-                    # 表示名（display_name）で一致チェック
-                    elif member.display_name.lower() == search_term:
-                        target_user = member
-                        break
+                    member_name = member.name.lower()
+                    member_display = member.display_name.lower()
+                    
+                    # 完全一致チェック（優先度最高）
+                    if member_name == search_term or member_display == search_term:
+                        exact_matches.append(member)
+                        continue
+                    
                     # 部分一致チェック
-                    elif search_term in member.name.lower() or search_term in member.display_name.lower():
-                        target_user = member
-                        break
+                    if (search_term in member_name or 
+                        search_term in member_display or
+                        member_name.startswith(search_term) or
+                        member_display.startswith(search_term)):
+                        partial_matches.append(member)
+                
+                # 結果の選択（完全一致 > 部分一致の順）
+                if exact_matches:
+                    target_user = exact_matches[0]
+                elif partial_matches:
+                    target_user = partial_matches[0]
+                
+                # デバッグ情報をログに出力
+                logging.info(f"ユーザー検索: '{user_input_text}' -> 完全一致:{len(exact_matches)}件, 部分一致:{len(partial_matches)}件")
             
             if target_user:
                 self.report_data.target_user = target_user
@@ -282,15 +297,39 @@ class UserInputModal(ui.Modal):
                 
                 await interaction.edit_original_response(embed=embed, view=view)
             else:
-                await interaction.followup.send(
-                    f"❌ 「{user_input_text}」に一致するユーザーが見つかりませんでした。\n\n"
-                    f"**検索のコツ:**\n"
-                    f"• 正確なユーザー名を入力してください\n"
-                    f"• ユーザーIDを使用してください\n"
-                    f"• @メンションをコピーして貼り付けてください\n"
-                    f"• そのユーザーがこのサーバーのメンバーか確認してください", 
-                    ephemeral=True
-                )
+                # 検索に失敗した場合の詳細情報
+                guild = interaction.guild
+                member_count = len(guild.members)
+                
+                # 類似ユーザー名を探す（最大5件）
+                similar_users = []
+                search_term = user_input_text.lower()
+                
+                for member in guild.members:
+                    member_name = member.name.lower()
+                    member_display = member.display_name.lower()
+                    
+                    # より緩い条件で類似ユーザーを検索
+                    if (any(char in member_name for char in search_term) or 
+                        any(char in member_display for char in search_term)):
+                        similar_users.append(f"• {member.display_name} (@{member.name})")
+                        if len(similar_users) >= 5:
+                            break
+                
+                error_message = f"❌ 「{user_input_text}」に一致するユーザーが見つかりませんでした。\n\n"
+                error_message += f"**サーバー情報:**\n• 総メンバー数: {member_count}人\n\n"
+                
+                if similar_users:
+                    error_message += "**類似するユーザー名:**\n" + "\n".join(similar_users) + "\n\n"
+                
+                error_message += ("**検索のコツ:**\n"
+                                "• 正確なユーザー名を入力してください\n"
+                                "• ニックネーム（表示名）も検索対象です\n"
+                                "• ユーザーIDを使用してください\n"
+                                "• @メンションをコピーして貼り付けてください\n"
+                                "• そのユーザーがこのサーバーのメンバーか確認してください")
+                
+                await interaction.followup.send(error_message, ephemeral=True)
                 
         except Exception as e:
             logging.error(f"ユーザー検索エラー: {e}", exc_info=True)
