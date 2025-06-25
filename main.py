@@ -149,8 +149,13 @@ class ReportStartView(ui.View):
             
             embed = discord.Embed(
                 title="👤 報告対象者の選択",
-                description="報告したい相手を選択してください。\n\n**使い方:**\n• 上のセレクトメニューから直接ユーザーを選択\n• または「手動でID入力」ボタンでユーザーIDやメンションを入力",
+                description="報告したい相手を選択してください。\n\n**使い方:**\n• 上のセレクトメニューから直接ユーザーを選択（最近アクティブなユーザーのみ表示）\n• または「🔍 ユーザーを検索」ボタンでユーザー名やIDを入力",
                 color=discord.Color.orange()
+            )
+            embed.add_field(
+                name="💡 ヒント",
+                value="セレクトメニューに目的のユーザーが表示されない場合は、「🔍 ユーザーを検索」ボタンをご利用ください。",
+                inline=False
             )
             embed.set_footer(text="ステップ 1/5 | 30秒でタイムアウトします")
             
@@ -198,7 +203,7 @@ class TargetUserSelectView(ui.View):
         
         await interaction.response.edit_message(embed=embed, view=view)
 
-    @ui.button(label="🔍 手動でID入力", style=discord.ButtonStyle.secondary)
+    @ui.button(label="🔍 ユーザーを検索", style=discord.ButtonStyle.secondary)
     async def input_user_manually(self, interaction: discord.Interaction, button: ui.Button):
         """手動でユーザーIDやメンションを入力する場合"""
         modal = UserInputModal(self.report_data)
@@ -207,50 +212,89 @@ class TargetUserSelectView(ui.View):
 class UserInputModal(ui.Modal):
     """ユーザー入力用のモーダル"""
     def __init__(self, report_data: ReportData):
-        super().__init__(title="報告対象者の入力")
+        super().__init__(title="ユーザー検索")
         self.report_data = report_data
 
     user_input = ui.TextInput(
         label="報告対象者",
-        placeholder="@ユーザー名 または ユーザーID を入力してください",
+        placeholder="ユーザー名、表示名、@メンション、またはユーザーIDを入力",
         required=True,
         max_length=100
     )
 
     async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
         user_input_text = self.user_input.value.strip()
         
-        # メンションからユーザーIDを抽出
-        if user_input_text.startswith('<@') and user_input_text.endswith('>'):
-            user_id_str = user_input_text[2:-1]
-            if user_id_str.startswith('!'):
-                user_id_str = user_id_str[1:]
-        else:
-            user_id_str = user_input_text
-        
         try:
-            user_id = int(user_id_str)
-            target_user = await interaction.client.fetch_user(user_id)
-            self.report_data.target_user = target_user
+            target_user = None
             
-            # 次のステップへ
-            view = RuleSelectView(self.report_data)
-            embed = discord.Embed(
-                title="📜 違反ルールの選択",
-                description=f"**報告対象者:** {target_user.mention}\n\n違反したルールを選択してください:",
-                color=discord.Color.orange()
-            )
-            embed.set_footer(text="ステップ 2/5")
+            # 1. メンションからユーザーIDを抽出
+            if user_input_text.startswith('<@') and user_input_text.endswith('>'):
+                user_id_str = user_input_text[2:-1]
+                if user_id_str.startswith('!'):
+                    user_id_str = user_id_str[1:]
+                try:
+                    user_id = int(user_id_str)
+                    target_user = await interaction.client.fetch_user(user_id)
+                except (ValueError, discord.NotFound):
+                    pass
             
-            await interaction.response.edit_message(embed=embed, view=view)
+            # 2. 数字のみの場合はユーザーIDとして処理
+            elif user_input_text.isdigit():
+                try:
+                    user_id = int(user_input_text)
+                    target_user = await interaction.client.fetch_user(user_id)
+                except discord.NotFound:
+                    pass
             
-        except (ValueError, discord.NotFound):
-            await interaction.response.send_message(
-                "❌ 有効なユーザーを見つけられませんでした。正しいメンションまたはユーザーIDを入力してください。", 
-                ephemeral=True
-            )
+            # 3. ユーザー名や表示名で検索
+            if not target_user:
+                guild = interaction.guild
+                search_term = user_input_text.lower()
+                
+                # サーバーメンバーから検索
+                for member in guild.members:
+                    # ユーザー名（username）で一致チェック
+                    if member.name.lower() == search_term:
+                        target_user = member
+                        break
+                    # 表示名（display_name）で一致チェック
+                    elif member.display_name.lower() == search_term:
+                        target_user = member
+                        break
+                    # 部分一致チェック
+                    elif search_term in member.name.lower() or search_term in member.display_name.lower():
+                        target_user = member
+                        break
+            
+            if target_user:
+                self.report_data.target_user = target_user
+                
+                # 次のステップへ
+                view = RuleSelectView(self.report_data)
+                embed = discord.Embed(
+                    title="📜 違反ルールの選択",
+                    description=f"**報告対象者:** {target_user.mention}\n\n違反したルールを選択してください:",
+                    color=discord.Color.orange()
+                )
+                embed.set_footer(text="ステップ 2/5")
+                
+                await interaction.edit_original_response(embed=embed, view=view)
+            else:
+                await interaction.followup.send(
+                    f"❌ 「{user_input_text}」に一致するユーザーが見つかりませんでした。\n\n"
+                    f"**検索のコツ:**\n"
+                    f"• 正確なユーザー名を入力してください\n"
+                    f"• ユーザーIDを使用してください\n"
+                    f"• @メンションをコピーして貼り付けてください\n"
+                    f"• そのユーザーがこのサーバーのメンバーか確認してください", 
+                    ephemeral=True
+                )
+                
         except Exception as e:
-            await interaction.response.send_message(f"❌ エラーが発生しました: {e}", ephemeral=True)
+            logging.error(f"ユーザー検索エラー: {e}", exc_info=True)
+            await interaction.followup.send(f"❌ ユーザー検索中にエラーが発生しました: {e}", ephemeral=True)
 
 class RuleSelectView(ui.View):
     """ルール選択用のView"""
