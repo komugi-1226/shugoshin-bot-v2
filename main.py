@@ -130,27 +130,35 @@ class ReportStartView(ui.View):
 
     @ui.button(label="📝 報告を開始する", style=discord.ButtonStyle.primary, emoji="🛡️", custom_id="report_start_button")
     async def start_report(self, interaction: discord.Interaction, button: ui.Button):
-        # クールダウンチェック
-        remaining_time = await db.check_cooldown(interaction.user.id, COOLDOWN_MINUTES * 60)
-        if remaining_time > 0:
-            await interaction.response.send_message(
-                f"⏰ クールダウン中です。あと `{int(remaining_time // 60)}分 {int(remaining_time % 60)}秒` 待ってください。", 
-                ephemeral=True
+        # 最初に即座に応答して、その後でクールダウンチェックを行う
+        await interaction.response.defer(ephemeral=True)
+        
+        try:
+            # クールダウンチェック
+            remaining_time = await db.check_cooldown(interaction.user.id, COOLDOWN_MINUTES * 60)
+            if remaining_time > 0:
+                await interaction.followup.send(
+                    f"⏰ クールダウン中です。あと `{int(remaining_time // 60)}分 {int(remaining_time % 60)}秒` 待ってください。", 
+                    ephemeral=True
+                )
+                return
+            
+            # 報告データを初期化
+            report_data = ReportData()
+            view = TargetUserSelectView(report_data)
+            
+            embed = discord.Embed(
+                title="👤 報告対象者の選択",
+                description="報告したい相手をメンションしてください。\n\n**使い方:**\n`@ユーザー名` または ユーザーIDを入力してください。",
+                color=discord.Color.orange()
             )
-            return
-        
-        # 報告データを初期化
-        report_data = ReportData()
-        view = TargetUserSelectView(report_data)
-        
-        embed = discord.Embed(
-            title="👤 報告対象者の選択",
-            description="報告したい相手をメンションしてください。\n\n**使い方:**\n`@ユーザー名` または ユーザーIDを入力してください。",
-            color=discord.Color.orange()
-        )
-        embed.set_footer(text="ステップ 1/5 | 30秒でタイムアウトします")
-        
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+            embed.set_footer(text="ステップ 1/5 | 30秒でタイムアウトします")
+            
+            await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+            
+        except Exception as e:
+            logging.error(f"報告開始ボタンでエラー: {e}", exc_info=True)
+            await interaction.followup.send("❌ 報告システムでエラーが発生しました。しばらく待ってから再試行してください。", ephemeral=True)
 
 class ReportData:
     """報告データを保持するクラス"""
