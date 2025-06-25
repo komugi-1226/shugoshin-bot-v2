@@ -149,7 +149,7 @@ class ReportStartView(ui.View):
             
             embed = discord.Embed(
                 title="👤 報告対象者の選択",
-                description="報告したい相手をメンションしてください。\n\n**使い方:**\n`@ユーザー名` または ユーザーIDを入力してください。",
+                description="報告したい相手を選択してください。\n\n**使い方:**\n• 上のセレクトメニューから直接ユーザーを選択\n• または「手動でID入力」ボタンでユーザーIDやメンションを入力",
                 color=discord.Color.orange()
             )
             embed.set_footer(text="ステップ 1/5 | 30秒でタイムアウトします")
@@ -176,8 +176,31 @@ class TargetUserSelectView(ui.View):
         super().__init__(timeout=30)
         self.report_data = report_data
 
-    @ui.button(label="ユーザーを入力", style=discord.ButtonStyle.secondary)
-    async def input_user(self, interaction: discord.Interaction, button: ui.Button):
+    @ui.select(
+        cls=ui.UserSelect,
+        placeholder="報告対象のユーザーを選択してください",
+        min_values=1,
+        max_values=1
+    )
+    async def select_user(self, interaction: discord.Interaction, select: ui.UserSelect):
+        """ユーザー選択時の処理"""
+        selected_user = select.values[0]
+        self.report_data.target_user = selected_user
+        
+        # 次のステップへ
+        view = RuleSelectView(self.report_data)
+        embed = discord.Embed(
+            title="📜 違反ルールの選択",
+            description=f"**報告対象者:** {selected_user.mention}\n\n違反したルールを選択してください:",
+            color=discord.Color.orange()
+        )
+        embed.set_footer(text="ステップ 2/5")
+        
+        await interaction.response.edit_message(embed=embed, view=view)
+
+    @ui.button(label="🔍 手動でID入力", style=discord.ButtonStyle.secondary)
+    async def input_user_manually(self, interaction: discord.Interaction, button: ui.Button):
+        """手動でユーザーIDやメンションを入力する場合"""
         modal = UserInputModal(self.report_data)
         await interaction.response.send_modal(modal)
 
