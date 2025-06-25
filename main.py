@@ -15,6 +15,7 @@ logging.basicConfig(level=logging.INFO)
 # --- 定数 ---
 TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 COOLDOWN_MINUTES = 5 # クールダウン時間（分）
+REPORT_BUTTON_CHANNEL_ID = 1382351852825346048  # ボタン式報告専用チャンネルID（変更したい場合はここを修正）
 
 # --- Discord Botの準備 ---
 intents = discord.Intents.default()
@@ -35,8 +36,48 @@ def run_flask():
 @client.event
 async def on_ready():
     await db.init_shugoshin_db()
+    
+    # 永続ビューを追加（ボット再起動後もボタンが動作するように）
+    client.add_view(ReportStartView())
+    
     await tree.sync()
     logging.info(f"✅ 守護神ボットが起動しました: {client.user}")
+    
+    # 報告用ボタンをチャンネルに送信
+    await setup_report_button()
+
+async def setup_report_button():
+    """報告用ボタンを特定のチャンネルに設置する"""
+    try:
+        channel = client.get_channel(REPORT_BUTTON_CHANNEL_ID)
+        if channel:
+            # 既存のボタンメッセージを探す（新しいメッセージを無限に作らないように）
+            async for message in channel.history(limit=50):
+                if message.author == client.user and message.embeds:
+                    embed = message.embeds[0]
+                    if embed.title and "報告システム" in embed.title:
+                        # 既存のボタンメッセージがあるので、新しく作らない
+                        logging.info("既存の報告ボタンが見つかりました")
+                        return
+            
+            # 新しい報告ボタンメッセージを作成
+            embed = discord.Embed(
+                title="🛡️ 守護神ボット 報告システム",
+                description="サーバーのルール違反を匿名で管理者に報告できます。\n下のボタンをクリックして報告を開始してください。",
+                color=discord.Color.blue()
+            )
+            embed.add_field(
+                name="📋 報告の流れ", 
+                value="① 報告開始ボタンをクリック\n② 対象者を選択\n③ 違反ルールを選択\n④ 緊急度を選択\n⑤ 詳細情報を入力\n⑥ 最終確認・送信", 
+                inline=False
+            )
+            embed.set_footer(text="報告は完全に匿名で処理されます")
+            
+            view = ReportStartView()
+            await channel.send(embed=embed, view=view)
+            logging.info("報告用ボタンを設置しました")
+    except Exception as e:
+        logging.error(f"報告ボタンの設置に失敗: {e}")
 
 # --- 確認ボタン付きView ---
 class ConfirmWarningView(ui.View):
@@ -67,6 +108,378 @@ class ConfirmWarningView(ui.View):
         await interaction.response.edit_message(content="警告の発行をキャンセルしました。", view=None)
         self.stop()
 
+# --- ボタンベースの報告システム用View ---
+class ReportStartView(ui.View):
+    """報告を開始するボタン"""
+    def __init__(self):
+        super().__init__(timeout=None)  # 永続化
+
+    @ui.button(label="📝 報告を開始する", style=discord.ButtonStyle.primary, emoji="🛡️")
+    async def start_report(self, interaction: discord.Interaction, button: ui.Button):
+        # クールダウンチェック
+        remaining_time = await db.check_cooldown(interaction.user.id, COOLDOWN_MINUTES * 60)
+        if remaining_time > 0:
+            await interaction.response.send_message(
+                f"⏰ クールダウン中です。あと `{int(remaining_time // 60)}分 {int(remaining_time % 60)}秒` 待ってください。", 
+                ephemeral=True
+            )
+            return
+        
+        # 報告データを初期化
+        report_data = ReportData()
+        view = TargetUserSelectView(report_data)
+        
+        embed = discord.Embed(
+            title="👤 報告対象者の選択",
+            description="報告したい相手をメンションしてください。\n\n**使い方:**\n`@ユーザー名` または ユーザーIDを入力してください。",
+            color=discord.Color.orange()
+        )
+        embed.set_footer(text="ステップ 1/5 | 30秒でタイムアウトします")
+        
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+class ReportData:
+    """報告データを保持するクラス"""
+    def __init__(self):
+        self.target_user = None
+        self.violated_rule = None
+        self.urgency = None
+        self.issue_warning = False
+        self.details = None
+        self.message_link = None
+
+class TargetUserSelectView(ui.View):
+    """対象ユーザー選択用のView"""
+    def __init__(self, report_data: ReportData):
+        super().__init__(timeout=30)
+        self.report_data = report_data
+
+    @ui.button(label="ユーザーを入力", style=discord.ButtonStyle.secondary)
+    async def input_user(self, interaction: discord.Interaction, button: ui.Button):
+        modal = UserInputModal(self.report_data)
+        await interaction.response.send_modal(modal)
+
+class UserInputModal(ui.Modal):
+    """ユーザー入力用のモーダル"""
+    def __init__(self, report_data: ReportData):
+        super().__init__(title="報告対象者の入力")
+        self.report_data = report_data
+
+    user_input = ui.TextInput(
+        label="報告対象者",
+        placeholder="@ユーザー名 または ユーザーID を入力してください",
+        required=True,
+        max_length=100
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        user_input_text = self.user_input.value.strip()
+        
+        # メンションからユーザーIDを抽出
+        if user_input_text.startswith('<@') and user_input_text.endswith('>'):
+            user_id_str = user_input_text[2:-1]
+            if user_id_str.startswith('!'):
+                user_id_str = user_id_str[1:]
+        else:
+            user_id_str = user_input_text
+        
+        try:
+            user_id = int(user_id_str)
+            target_user = await interaction.client.fetch_user(user_id)
+            self.report_data.target_user = target_user
+            
+            # 次のステップへ
+            view = RuleSelectView(self.report_data)
+            embed = discord.Embed(
+                title="📜 違反ルールの選択",
+                description=f"**報告対象者:** {target_user.mention}\n\n違反したルールを選択してください:",
+                color=discord.Color.orange()
+            )
+            embed.set_footer(text="ステップ 2/5")
+            
+            await interaction.response.edit_message(embed=embed, view=view)
+            
+        except (ValueError, discord.NotFound):
+            await interaction.response.send_message(
+                "❌ 有効なユーザーを見つけられませんでした。正しいメンションまたはユーザーIDを入力してください。", 
+                ephemeral=True
+            )
+        except Exception as e:
+            await interaction.response.send_message(f"❌ エラーが発生しました: {e}", ephemeral=True)
+
+class RuleSelectView(ui.View):
+    """ルール選択用のView"""
+    def __init__(self, report_data: ReportData):
+        super().__init__(timeout=60)
+        self.report_data = report_data
+
+    @ui.select(
+        placeholder="違反したルールを選択してください",
+        options=[
+            discord.SelectOption(
+                label="そのいち：ひとをきずつけない",
+                description="他者への攻撃的な発言や行動",
+                emoji="💔",
+                value="そのいち：ひとをきずつけない 💔"
+            ),
+            discord.SelectOption(
+                label="そのに：ひとのいやがることをしない",
+                description="迷惑行為やハラスメント",
+                emoji="🚫",
+                value="そのに：ひとのいやがることをしない 🚫"
+            ),
+            discord.SelectOption(
+                label="そのさん：かってにフレンドにならない",
+                description="無断でのフレンド申請や個人情報の要求",
+                emoji="👥",
+                value="そのさん：かってにフレンドにならない 👥"
+            ),
+            discord.SelectOption(
+                label="そのよん：くすりのなまえはかきません",
+                description="薬物に関する不適切な発言",
+                emoji="💊",
+                value="そのよん：くすりのなまえはかきません 💊"
+            ),
+            discord.SelectOption(
+                label="そのご：あきらかなせんでんこういはしません",
+                description="宣伝や営利活動",
+                emoji="📢",
+                value="そのご：あきらかなせんでんこういはしません 📢"
+            ),
+            discord.SelectOption(
+                label="その他の違反",
+                description="上記以外のルール違反",
+                emoji="❓",
+                value="その他"
+            ),
+        ]
+    )
+    async def rule_select(self, interaction: discord.Interaction, select: ui.Select):
+        self.report_data.violated_rule = select.values[0]
+        
+        # 次のステップへ
+        view = UrgencySelectView(self.report_data)
+        embed = discord.Embed(
+            title="🔥 緊急度の選択",
+            description=f"**報告対象者:** {self.report_data.target_user.mention}\n**違反ルール:** {self.report_data.violated_rule}\n\n緊急度を選択してください:",
+            color=discord.Color.orange()
+        )
+        embed.set_footer(text="ステップ 3/5")
+        
+        await interaction.response.edit_message(embed=embed, view=view)
+
+class UrgencySelectView(ui.View):
+    """緊急度選択用のView"""
+    def __init__(self, report_data: ReportData):
+        super().__init__(timeout=60)
+        self.report_data = report_data
+
+    @ui.select(
+        placeholder="緊急度を選択してください",
+        options=[
+            discord.SelectOption(
+                label="低：通常の違反報告",
+                description="通常の処理で問題ありません",
+                emoji="🟢",
+                value="低"
+            ),
+            discord.SelectOption(
+                label="中：早めの対応が必要",
+                description="早めの確認をお願いします",
+                emoji="🟡",
+                value="中"
+            ),
+            discord.SelectOption(
+                label="高：即座の対応が必要",
+                description="緊急で対応が必要です",
+                emoji="🔴",
+                value="高"
+            ),
+        ]
+    )
+    async def urgency_select(self, interaction: discord.Interaction, select: ui.Select):
+        self.report_data.urgency = select.values[0]
+        
+        # 次のステップへ
+        view = WarningSelectView(self.report_data)
+        embed = discord.Embed(
+            title="⚠️ 警告発行の選択",
+            description=f"**報告対象者:** {self.report_data.target_user.mention}\n**違反ルール:** {self.report_data.violated_rule}\n**緊急度:** {self.report_data.urgency}\n\n対象者に警告を発行しますか？",
+            color=discord.Color.orange()
+        )
+        embed.add_field(
+            name="⚠️ 注意",
+            value="警告を発行すると、報告チャンネルで対象者にメンションが送られます。\nタイミングから通報者が特定される可能性があります。",
+            inline=False
+        )
+        embed.set_footer(text="ステップ 4/5")
+        
+        await interaction.response.edit_message(embed=embed, view=view)
+
+class WarningSelectView(ui.View):
+    """警告発行選択用のView"""
+    def __init__(self, report_data: ReportData):
+        super().__init__(timeout=60)
+        self.report_data = report_data
+
+    @ui.button(label="はい、警告を発行する", style=discord.ButtonStyle.danger, emoji="⚠️")
+    async def issue_warning(self, interaction: discord.Interaction, button: ui.Button):
+        self.report_data.issue_warning = True
+        await self._proceed_to_details(interaction)
+
+    @ui.button(label="いいえ、管理者にのみ報告", style=discord.ButtonStyle.secondary, emoji="🤐")
+    async def no_warning(self, interaction: discord.Interaction, button: ui.Button):
+        self.report_data.issue_warning = False
+        await self._proceed_to_details(interaction)
+
+    async def _proceed_to_details(self, interaction: discord.Interaction):
+        """詳細入力ステップへ進む"""
+        modal = DetailsInputModal(self.report_data)
+        await interaction.response.send_modal(modal)
+
+class DetailsInputModal(ui.Modal):
+    """詳細情報入力用のモーダル"""
+    def __init__(self, report_data: ReportData):
+        super().__init__(title="報告の詳細情報")
+        self.report_data = report_data
+
+    details = ui.TextInput(
+        label="詳しい状況（任意）",
+        placeholder="何があったのか、詳しく教えてください。「その他」を選んだ場合は必須です。",
+        style=discord.TextStyle.long,
+        required=False,
+        max_length=1000
+    )
+
+    message_link = ui.TextInput(
+        label="証拠となるメッセージのリンク（任意）",
+        placeholder="https://discord.com/channels/...",
+        required=False,
+        max_length=200
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        self.report_data.details = self.details.value if self.details.value else None
+        self.report_data.message_link = self.message_link.value if self.message_link.value else None
+        
+        # 「その他」を選んだ場合、詳細が必須
+        if self.report_data.violated_rule == "その他" and not self.report_data.details:
+            await interaction.response.send_message(
+                "❌ 「その他」のルール違反を選んだ場合、詳細な状況の入力が必要です。", 
+                ephemeral=True
+            )
+            return
+        
+        # 最終確認ステップへ
+        view = FinalConfirmView(self.report_data)
+        embed = discord.Embed(
+            title="✅ 最終確認",
+            description="以下の内容で報告を送信します。よろしいですか？",
+            color=discord.Color.green()
+        )
+        embed.add_field(name="👤 報告対象者", value=self.report_data.target_user.mention, inline=False)
+        embed.add_field(name="📜 違反ルール", value=self.report_data.violated_rule, inline=False)
+        embed.add_field(name="🔥 緊急度", value=self.report_data.urgency, inline=False)
+        embed.add_field(name="⚠️ 警告発行", value="はい" if self.report_data.issue_warning else "いいえ", inline=False)
+        if self.report_data.details:
+            embed.add_field(name="📝 詳細", value=self.report_data.details[:500] + ("..." if len(self.report_data.details) > 500 else ""), inline=False)
+        if self.report_data.message_link:
+            embed.add_field(name="🔗 証拠リンク", value=self.report_data.message_link, inline=False)
+        embed.set_footer(text="ステップ 5/5 | この報告は匿名で送信されます")
+        
+        await interaction.response.edit_message(embed=embed, view=view)
+
+class FinalConfirmView(ui.View):
+    """最終確認用のView"""
+    def __init__(self, report_data: ReportData):
+        super().__init__(timeout=60)
+        self.report_data = report_data
+
+    @ui.button(label="📤 報告を送信する", style=discord.ButtonStyle.success, emoji="✅")
+    async def submit_report(self, interaction: discord.Interaction, button: ui.Button):
+        await interaction.response.defer(ephemeral=True)
+        
+        try:
+            # 報告を送信（既存のreportコマンドのロジックを再利用）
+            settings = await db.get_guild_settings(interaction.guild.id)
+            if not settings or not settings.get('report_channel_id'):
+                await interaction.followup.send("❌ ボットの初期設定が完了していません。管理者に連絡してください。", ephemeral=True)
+                return
+
+            report_id = await db.create_report(
+                interaction.guild.id, 
+                self.report_data.target_user.id, 
+                self.report_data.violated_rule, 
+                self.report_data.details, 
+                self.report_data.message_link, 
+                self.report_data.urgency
+            )
+            
+            report_channel = client.get_channel(settings['report_channel_id'])
+            
+            # 埋め込みの色と絵文字を設定
+            embed_color = discord.Color.greyple()
+            title_prefix = "📝"
+            content = None
+
+            if self.report_data.urgency == "中":
+                embed_color = discord.Color.orange()
+                title_prefix = "⚠️"
+            elif self.report_data.urgency == "高":
+                embed_color = discord.Color.red()
+                title_prefix = "🚨"
+                if settings.get('urgent_role_id'):
+                    role = interaction.guild.get_role(settings['urgent_role_id'])
+                    if role: 
+                        content = f"{role.mention} 緊急の報告です！"
+            
+            embed = discord.Embed(title=f"{title_prefix} 新規の匿名報告 (ID: {report_id})", color=embed_color)
+            embed.add_field(name="👤 報告対象者", value=f"{self.report_data.target_user.mention} ({self.report_data.target_user.id})", inline=False)
+            embed.add_field(name="📜 違反したルール", value=self.report_data.violated_rule, inline=False)
+            embed.add_field(name="🔥 緊急度", value=self.report_data.urgency, inline=False)
+            if self.report_data.details: 
+                embed.add_field(name="📝 詳細", value=self.report_data.details, inline=False)
+            if self.report_data.message_link: 
+                embed.add_field(name="🔗 関連メッセージ", value=self.report_data.message_link, inline=False)
+            embed.add_field(name="📊 ステータス", value="未対応", inline=False)
+            embed.set_footer(text="この報告は匿名で送信されました（ボタン式報告）")
+
+            sent_message = await report_channel.send(content=content, embed=embed)
+            await db.update_report_message_id(report_id, sent_message.id)
+
+            # 警告を発行する場合
+            if self.report_data.issue_warning:
+                warning_message = (
+                    f"{self.report_data.target_user.mention}\n\n"
+                    f"⚠️ **サーバー管理者からのお知らせです** ⚠️\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"あなたの行動について、サーバーのルールに関する報告が寄せられました。\n\n"
+                    f"**該当ルール:** {self.report_data.violated_rule}\n\n"
+                    f"みんなが楽しく過ごせるよう、今一度ルールの確認をお願いいたします。\n"
+                    f"ご不明な点があれば、このチャンネルで返信するか、管理者にDMを送ってください。\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━"
+                )
+                await report_channel.send(warning_message)
+
+            final_message = "✅ 報告を送信しました。ご協力ありがとうございます。"
+            if self.report_data.issue_warning:
+                final_message = "✅ 報告と警告発行を完了しました。ご協力ありがとうございます。"
+
+            await interaction.followup.send(final_message, ephemeral=True)
+
+        except Exception as e:
+            logging.error(f"ボタン式報告処理中にエラー: {e}", exc_info=True)
+            await interaction.followup.send(f"❌ 報告の送信中にエラーが発生しました: {e}", ephemeral=True)
+
+    @ui.button(label="❌ キャンセル", style=discord.ButtonStyle.secondary)
+    async def cancel_report(self, interaction: discord.Interaction, button: ui.Button):
+        embed = discord.Embed(
+            title="❌ 報告をキャンセルしました",
+            description="報告は送信されませんでした。",
+            color=discord.Color.red()
+        )
+        await interaction.response.edit_message(embed=embed, view=None)
+
 # --- スラッシュコマンド ---
 
 @tree.command(name="setup", description="【管理者用】守護神ボットの初期設定を行います。")
@@ -94,6 +507,46 @@ async def setup_error(interaction: discord.Interaction, error: app_commands.AppC
     else:
         await interaction.response.send_message(f"設定中にエラーが発生しました: {error}", ephemeral=True)
 
+@tree.command(name="setup_report_button", description="【管理者用】報告ボタンを再設置します。")
+@app_commands.checks.has_permissions(administrator=True)
+@app_commands.describe(channel="ボタンを設置するチャンネル（指定しない場合は設定済みのチャンネル）")
+async def setup_report_button_command(interaction: discord.Interaction, channel: discord.TextChannel = None):
+    """報告ボタンを手動で設置するコマンド"""
+    await interaction.response.defer(ephemeral=True)
+    
+    target_channel = channel if channel else client.get_channel(REPORT_BUTTON_CHANNEL_ID)
+    
+    if not target_channel:
+        await interaction.followup.send("❌ チャンネルが見つかりません。", ephemeral=True)
+        return
+    
+    try:
+        embed = discord.Embed(
+            title="🛡️ 守護神ボット 報告システム",
+            description="サーバーのルール違反を匿名で管理者に報告できます。\n下のボタンをクリックして報告を開始してください。",
+            color=discord.Color.blue()
+        )
+        embed.add_field(
+            name="📋 報告の流れ", 
+            value="① 報告開始ボタンをクリック\n② 対象者を選択\n③ 違反ルールを選択\n④ 緊急度を選択\n⑤ 詳細情報を入力\n⑥ 最終確認・送信", 
+            inline=False
+        )
+        embed.set_footer(text="報告は完全に匿名で処理されます")
+        
+        view = ReportStartView()
+        await target_channel.send(embed=embed, view=view)
+        
+        await interaction.followup.send(f"✅ 報告ボタンを {target_channel.mention} に設置しました。", ephemeral=True)
+        
+    except Exception as e:
+        await interaction.followup.send(f"❌ ボタンの設置に失敗しました: {e}", ephemeral=True)
+
+@setup_report_button_command.error
+async def setup_report_button_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    if isinstance(error, app_commands.MissingPermissions):
+        await interaction.response.send_message("このコマンドはサーバーの管理者のみが実行できます。", ephemeral=True)
+    else:
+        await interaction.response.send_message(f"ボタン設置中にエラーが発生しました: {error}", ephemeral=True)
 
 # ★★★★★★★ ここが超進化した /report コマンド ★★★★★★★
 @tree.command(name="report", description="サーバーのルール違反を匿名で管理者に報告します。")
