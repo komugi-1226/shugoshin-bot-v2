@@ -9,7 +9,7 @@ from flask import Flask
 import database as db
 
 # --- 初期設定 ---
-load_dotenv()
+load_dotenv()  # 環境変数（.env）からSupabaseデータベース接続情報を読み込み
 logging.basicConfig(level=logging.INFO)
 
 # --- 定数 ---
@@ -37,6 +37,7 @@ def run_flask():
 # --- Botのイベント ---
 @client.event
 async def on_ready():
+    # Supabaseローカル環境で守護神ボット用テーブルを初期化
     await db.init_shugoshin_db()
     
     # 永続ビューを追加（ボット再起動後もボタンが動作するように）

@@ -1,0 +1,283 @@
+# Node.js関連ファイル
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+.pnpm-debug.log*
+
+# 実行時一時ファイル
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# ライブラリ記録
+lib-cov
+
+# nyc テストカバレッジ
+.nyc_output
+
+# Grunt 中間ストレージ (https://gruntjs.com/creating-plugins#storing-task-files)
+.grunt
+
+# Bower 依存関係ディレクトリ (https://bower.io/)
+bower_components
+
+# node-waf 設定
+.lock-wscript
+
+# コンパイル済みバイナリアドオン (https://nodejs.org/api/addons.html)
+build/Release
+
+# 依存関係ディレクトリ
+node_modules/
+jspm_packages/
+
+# Snowpack 依存関係ディレクトリ (https://snowpack.dev/)
+web_modules/
+
+# TypeScript キャッシュ
+*.tsbuildinfo
+
+# オプション npm キャッシュディレクトリ
+.npm
+
+# オプション eslint キャッシュ
+.eslintcache
+
+# Microbundle キャッシュ
+.rpt2_cache/
+.rts2_cache_cjs/
+.rts2_cache_es/
+.rts2_cache_umd/
+
+# オプション REPL履歴
+.node_repl_history
+
+# npm pack からの出力
+*.tgz
+
+# Yarn Integrity file
+.yarn-integrity
+
+# 環境変数ファイル
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# parcel-bundler キャッシュ (https://parceljs.org/)
+.cache
+.parcel-cache
+
+# Next.js ビルド出力
+.next
+out
+
+# Nuxt.js ビルド / 生成出力
+.nuxt
+dist
+
+# Gatsby ファイル
+.cache/
+public
+
+# Vuepress ビルド出力
+.vuepress/dist
+
+# Serverless ディレクトリ
+.serverless/
+
+# FuseBox キャッシュ
+.fusebox/
+
+# DynamoDB Local ファイル
+.dynamodb/
+
+# TernJS ポートファイル
+.tern-port
+
+# Stores VSCode versions used for testing VSCode extensions
+.vscode-test
+
+# yarn v2
+.yarn/cache
+.yarn/unplugged
+.yarn/build-state.yml
+.yarn/install-state.gz
+.pnp.*
+
+# Python関連ファイル
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# 単体テスト / カバレッジレポート
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+cover/
+
+# Translations
+*.mo
+*.pot
+
+# Django stuff:
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+
+# Flask stuff:
+instance/
+.webassets-cache
+
+# Scrapy stuff:
+.scrapy
+
+# Sphinx documentation
+docs/_build/
+
+# PyBuilder
+.pybuilder/
+target/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
+
+# pyenv
+.python-version
+
+# pipenv
+Pipfile.lock
+
+# poetry
+poetry.lock
+
+# pdm
+.pdm.toml
+
+# PEP 582
+__pypackages__/
+
+# Celery stuff
+celerybeat-schedule
+celerybeat.pid
+
+# SageMath parsed files
+*.sage.py
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# pytype static type analyzer
+.pytype/
+
+# Cython debug symbols
+cython_debug/
+
+# Supabase関連ファイル
+# Supabaseローカル設定ファイル
+supabase/.env
+supabase/.env.local
+
+# Supabaseローカル開発データベース
+supabase/.branches/
+supabase/logs/
+
+# ローカル設定とシークレット
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# OS生成ファイル
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE設定ファイル（必要に応じて削除）
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ログファイル
+*.log
+logs/
+
+# 一時ファイル
+tmp/
+temp/

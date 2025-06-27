@@ -1,27 +1,37 @@
 import os
 import asyncpg
 import datetime
+from dotenv import load_dotenv
 
-# ### 共通で使う道具（関数） ###
+# 環境変数を読み込み
+load_dotenv()
+
+# ### Supabaseデータベース接続用の共通関数 ###
+# Supabaseローカル開発環境のPostgreSQLデータベースに直接接続
 DATABASE_URL = os.environ.get('DATABASE_URL')
 
 async def get_pool():
+    """Supabaseローカル開発環境のPostgreSQLデータベース接続プールを取得"""
     if not DATABASE_URL:
         raise ValueError("DATABASE_URL environment variable is not set.")
     return await asyncpg.create_pool(DATABASE_URL)
 # #################################
 
 
-# --- BUMPくん用の関数 ---
+# --- BUMPくん用のデータベース関数 ---
+# Supabaseローカル環境でBumpBot用テーブルを管理
 async def init_db():
+    """BumpBot用のテーブルを初期化（Supabaseローカル環境）"""
     pool = await get_pool()
     async with pool.acquire() as connection:
+        # ユーザーのBump回数を記録するテーブル
         await connection.execute('''
             CREATE TABLE IF NOT EXISTS users (
                 user_id BIGINT PRIMARY KEY,
                 bump_count INTEGER NOT NULL DEFAULT 0
             );
         ''')
+        # リマインダー機能用のテーブル
         await connection.execute('''
             CREATE TABLE IF NOT EXISTS reminders (
                 id SERIAL PRIMARY KEY,
@@ -29,12 +39,14 @@ async def init_db():
                 remind_at TIMESTAMP WITH TIME ZONE NOT NULL
             );
         ''')
+        # 設定値を保存するテーブル
         await connection.execute('''
             CREATE TABLE IF NOT EXISTS settings (
                 key TEXT PRIMARY KEY,
                 value TEXT
             );
         ''')
+        # 初期設定値を挿入
         await connection.execute('''
             INSERT INTO settings (key, value) VALUES ('scan_completed', 'false')
             ON CONFLICT (key) DO NOTHING;
@@ -107,12 +119,13 @@ async def get_total_bumps():
     return total or 0
 
 
-# --- 自己紹介Bot用の関数 (v2仕様) ---
+# --- 自己紹介Bot用のデータベース関数 (v2仕様) ---
+# Supabaseローカル環境で自己紹介データを管理
 async def init_intro_bot_db():
-    """自己紹介Bot専用のテーブルを作成する"""
+    """自己紹介Bot専用のテーブルを作成する（Supabaseローカル環境）"""
     pool = await get_pool()
     async with pool.acquire() as connection:
-        # メッセージリンクの代わりに、チャンネルIDとメッセージIDを保存する
+        # メッセージリンクの代わりに、チャンネルIDとメッセージIDを個別に保存
         await connection.execute('''
             CREATE TABLE IF NOT EXISTS introductions (
                 user_id BIGINT PRIMARY KEY,
@@ -144,10 +157,13 @@ async def get_intro_ids(user_id):
     return record # 存在しない場合はNoneが返る
 
 
-# --- 守護神ボット用の関数 ---
+# --- 守護神ボット用のデータベース関数 ---
+# Supabaseローカル環境で通報・管理機能を管理
 async def init_shugoshin_db():
+    """守護神ボット用のテーブルを初期化（Supabaseローカル環境）"""
     pool = await get_pool()
     async with pool.acquire() as connection:
+        # 通報データを保存するメインテーブル
         await connection.execute('''
             CREATE TABLE IF NOT EXISTS reports (
                 report_id SERIAL PRIMARY KEY, guild_id BIGINT, message_id BIGINT,
@@ -156,6 +172,7 @@ async def init_shugoshin_db():
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             );
         ''')
+        # サーバー別の設定を保存するテーブル
         await connection.execute('''
             CREATE TABLE IF NOT EXISTS guild_settings (
                 guild_id BIGINT PRIMARY KEY,
@@ -163,6 +180,7 @@ async def init_shugoshin_db():
                 urgent_role_id BIGINT
             );
         ''')
+        # 通報のクールダウン機能用テーブル
         await connection.execute('''
             CREATE TABLE IF NOT EXISTS report_cooldowns (
                 user_id BIGINT PRIMARY KEY,
