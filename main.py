@@ -625,9 +625,8 @@ class FinalConfirmView(ui.View):
     target_user="① 報告したい相手を選んでね",
     violated_rule="② 違反したルールを選んでね",
     urgency="③ 緊急度を選んでね",
-    keikoku_suru="④ 相手に警告する？（管理者と本人だけが見える場所でメンションします）",
-    details="⑤ 詳しい状況を書いてね（『その他』を選んだ場合は必須だよ）",
-    message_link="⑥ 証拠になるメッセージのリンクがあれば貼ってね"
+    details="④ 何があったか詳しく教えてください（『その他』を選んだ場合は必ず書いてください）",
+    message_link="⑤ 問題のあったメッセージのリンクがあれば貼ってください"
 )
 @app_commands.choices(
     violated_rule=[
@@ -641,17 +640,12 @@ class FinalConfirmView(ui.View):
         app_commands.Choice(name="中：早めの対応が必要", value="中"),
         app_commands.Choice(name="高：即座の対応が必要", value="高"),
     ],
-    keikoku_suru=[
-        app_commands.Choice(name="はい（相手に通知がいきます ※匿名性が少し下がります）", value="yes"),
-        app_commands.Choice(name="いいえ（管理者だけに報告します）", value="no"),
-    ]
 )
 async def report(
     interaction: discord.Interaction,
     target_user: discord.User,
     violated_rule: app_commands.Choice[str],
     urgency: app_commands.Choice[str],
-    keikoku_suru: app_commands.Choice[str],
     details: str = None,
     message_link: str = None
 ):
@@ -667,18 +661,6 @@ async def report(
         await interaction.followup.send(f"クールダウン中です。あと `{int(remaining_time // 60)}分 {int(remaining_time % 60)}秒` 待ってください。", ephemeral=True)
         return
 
-    issue_warning_confirmed = False
-    if keikoku_suru.value == "yes":
-        view = ConfirmWarningView(interaction=interaction)
-        await interaction.followup.send(
-            "⚠️ **警告:** 対象者に報告用チャンネルでメンションして警告を発行します。"
-            "タイミングから通報者が特定される可能性がありますが、続行しますか？",
-            view=view, ephemeral=True
-        )
-        await view.wait()
-        if not view.confirmed:
-            return
-        issue_warning_confirmed = True
     
     try:
         report_id = await db.create_report(
@@ -714,32 +696,12 @@ async def report(
         await db.update_report_message_id(report_id, sent_message.id)
 
         final_message = "通報を受け付けました。ご協力ありがとうございます。"
-        if issue_warning_confirmed:
-            warning_message = (
-                f"{target_user.mention}\n\n"
-                f"⚠️ **サーバー管理者からのお知らせです** ⚠️\n"
-                f"━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"あなたの行動について、サーバーのルールに関する報告が寄せられました。\n\n"
-                f"**該当ルール:** {violated_rule.value}\n\n"
-                f"みんなが楽しく過ごせるよう、今一度ルールの確認をお願いいたします。\n"
-                f"ご不明な点があれば、このチャンネルで返信するか、管理者にDMを送ってください。\n"
-                f"━━━━━━━━━━━━━━━━━━━━━━"
-            )
-            await report_channel.send(warning_message)
-            final_message = "通報と警告発行を受け付けました。ご協力ありがとうございます。"
 
-        if interaction.is_expired():
-             await interaction.followup.send(final_message, ephemeral=True)
-        else:
-             if issue_warning_confirmed:
-                await interaction.edit_original_response(content=final_message, view=None)
-             else:
-                await interaction.followup.send(final_message, ephemeral=True)
+        await interaction.followup.send(final_message, ephemeral=True)
 
     except Exception as e:
         logging.error(f"通報処理中にエラー: {e}", exc_info=True)
-        if not interaction.is_expired():
-            await interaction.edit_original_response(content=f"不明なエラーが発生しました: {e}", view=None)
+        await interaction.followup.send(f"不明なエラーが発生しました: {e}", ephemeral=True)
 
 
 # (/kanrinin グループ - 管理者用報告管理コマンド)
