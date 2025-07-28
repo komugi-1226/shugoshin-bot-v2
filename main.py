@@ -15,7 +15,7 @@ logging.basicConfig(level=logging.INFO)
 # --- 定数 ---
 TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 COOLDOWN_MINUTES = 5 # クールダウン時間（分）
-REPORT_BUTTON_CHANNEL_ID = 1382351852825346048  # ボタン式報告専用チャンネルID（変更したい場合はここを修正）
+REPORT_BUTTON_CHANNEL_ID = 1399405974841852116  # ボタン式報告専用チャンネルID（変更したい場合はここを修正）
 
 # --- Discord Botの準備 ---
 intents = discord.Intents.default()
@@ -704,187 +704,187 @@ async def report(
         await interaction.followup.send(f"不明なエラーが発生しました: {e}", ephemeral=True)
 
 
-# (/kanrinin グループ - 管理者用報告管理コマンド)
-report_manage_group = app_commands.Group(name="kanrinin", description="報告を管理します。")
+# (/kanrinin グループ - 管理者用報告管理コマンド) - 一時的に非表示
+# report_manage_group = app_commands.Group(name="kanrinin", description="報告を管理します。")
 
-@report_manage_group.command(name="status", description="報告のステータスを変更します。")
-@app_commands.describe(report_id="ステータスを変更したい報告のID", new_status="新しいステータス")
-@app_commands.choices(new_status=[app_commands.Choice(name="対応中", value="対応中"), app_commands.Choice(name="解決済み", value="解決済み"), app_commands.Choice(name="却下", value="却下"),])
-async def status(interaction: discord.Interaction, report_id: int, new_status: app_commands.Choice[str]):
-    await interaction.response.defer(ephemeral=True)
-    settings = await db.get_guild_settings(interaction.guild.id)
-    if not settings: return await interaction.followup.send("未設定です。`/setup`を実行してください。", ephemeral=True)
-    try:
-        report_data = await db.get_report(report_id)
-        if not report_data:
-            await interaction.followup.send(f"エラー: 報告ID `{report_id}` が見つかりません。", ephemeral=True)
-            return
-        report_channel = client.get_channel(settings['report_channel_id'])
-        original_message = await report_channel.fetch_message(report_data['message_id'])
-        original_embed = original_message.embeds[0]
-        status_colors = {"対応中": discord.Color.yellow(), "解決済み": discord.Color.green(), "却下": discord.Color.greyple()}
-        original_embed.color = status_colors.get(new_status.value)
-        for i, field in enumerate(original_embed.fields):
-            if field.name == "📊 ステータス":
-                original_embed.set_field_at(i, name="📊 ステータス", value=new_status.value, inline=False)
-                break
-        await original_message.edit(embed=original_embed)
-        await db.update_report_status(report_id, new_status.value)
-        await interaction.followup.send(f"報告ID `{report_id}` のステータスを「{new_status.value}」に変更しました。", ephemeral=True)
-    except Exception as e:
-        await interaction.followup.send(f"ステータス更新中にエラー: {e}", ephemeral=True)
+# @report_manage_group.command(name="status", description="報告のステータスを変更します。")
+# @app_commands.describe(report_id="ステータスを変更したい報告のID", new_status="新しいステータス")
+# @app_commands.choices(new_status=[app_commands.Choice(name="対応中", value="対応中"), app_commands.Choice(name="解決済み", value="解決済み"), app_commands.Choice(name="却下", value="却下"),])
+# async def status(interaction: discord.Interaction, report_id: int, new_status: app_commands.Choice[str]):
+#     await interaction.response.defer(ephemeral=True)
+#     settings = await db.get_guild_settings(interaction.guild.id)
+#     if not settings: return await interaction.followup.send("未設定です。`/setup`を実行してください。", ephemeral=True)
+#     try:
+#         report_data = await db.get_report(report_id)
+#         if not report_data:
+#             await interaction.followup.send(f"エラー: 報告ID `{report_id}` が見つかりません。", ephemeral=True)
+#             return
+#         report_channel = client.get_channel(settings['report_channel_id'])
+#         original_message = await report_channel.fetch_message(report_data['message_id'])
+#         original_embed = original_message.embeds[0]
+#         status_colors = {"対応中": discord.Color.yellow(), "解決済み": discord.Color.green(), "却下": discord.Color.greyple()}
+#         original_embed.color = status_colors.get(new_status.value)
+#         for i, field in enumerate(original_embed.fields):
+#             if field.name == "📊 ステータス":
+#                 original_embed.set_field_at(i, name="📊 ステータス", value=new_status.value, inline=False)
+#                 break
+#         await original_message.edit(embed=original_embed)
+#         await db.update_report_status(report_id, new_status.value)
+#         await interaction.followup.send(f"報告ID `{report_id}` のステータスを「{new_status.value}」に変更しました。", ephemeral=True)
+#     except Exception as e:
+#         await interaction.followup.send(f"ステータス更新中にエラー: {e}", ephemeral=True)
 
-@report_manage_group.command(name="list", description="報告の一覧を表示します。")
-@app_commands.describe(filter="表示するステータスで絞り込みます。")
-@app_commands.choices(filter=[app_commands.Choice(name="すべて", value="all"), app_commands.Choice(name="未対応", value="未対応"), app_commands.Choice(name="対応中", value="対応中"),])
-async def list_reports_cmd(interaction: discord.Interaction, filter: app_commands.Choice[str] = None):
-    await interaction.response.defer(ephemeral=True)
-    status_filter = filter.value if filter else None
-    reports = await db.list_reports(status_filter)
-    if not reports:
-        await interaction.followup.send("該当する報告はありません。", ephemeral=True)
-        return
-    embed = discord.Embed(title=f"📜 報告リスト ({filter.name if filter else '最新'})", color=discord.Color.blue())
-    description = ""
-    for report in reports:
-        try:
-            target_user = await client.fetch_user(report['target_user_id'])
-            user_name = target_user.name
-        except discord.NotFound:
-            user_name = "不明なユーザー"
-        description += f"**ID: {report['report_id']}** | 対象: {user_name} | ステータス: `{report['status']}`\n"
-    embed.description = description
-    await interaction.followup.send(embed=embed, ephemeral=True)
+# @report_manage_group.command(name="list", description="報告の一覧を表示します。")
+# @app_commands.describe(filter="表示するステータスで絞り込みます。")
+# @app_commands.choices(filter=[app_commands.Choice(name="すべて", value="all"), app_commands.Choice(name="未対応", value="未対応"), app_commands.Choice(name="対応中", value="対応中"),])
+# async def list_reports_cmd(interaction: discord.Interaction, filter: app_commands.Choice[str] = None):
+#     await interaction.response.defer(ephemeral=True)
+#     status_filter = filter.value if filter else None
+#     reports = await db.list_reports(status_filter)
+#     if not reports:
+#         await interaction.followup.send("該当する報告はありません。", ephemeral=True)
+#         return
+#     embed = discord.Embed(title=f"📜 報告リスト ({filter.name if filter else '最新'})", color=discord.Color.blue())
+#     description = ""
+#     for report in reports:
+#         try:
+#             target_user = await client.fetch_user(report['target_user_id'])
+#             user_name = target_user.name
+#         except discord.NotFound:
+#             user_name = "不明なユーザー"
+#         description += f"**ID: {report['report_id']}** | 対象: {user_name} | ステータス: `{report['status']}`\n"
+#     embed.description = description
+#     await interaction.followup.send(embed=embed, ephemeral=True)
 
-@report_manage_group.command(name="stats", description="報告の統計情報を表示します。")
-async def stats(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True)
-    stats_data = await db.get_report_stats()
-    total = sum(stats_data.values())
-    embed = discord.Embed(title="📈 報告統計", description=f"総報告数: **{total}** 件", color=discord.Color.purple())
-    unhandled = stats_data.get('未対応', 0)
-    in_progress = stats_data.get('対応中', 0)
-    resolved = stats_data.get('解決済み', 0)
-    rejected = stats_data.get('却下', 0)
-    embed.add_field(name="未対応 🔴", value=f"**{unhandled}** 件", inline=True)
-    embed.add_field(name="対応中 🟡", value=f"**{in_progress}** 件", inline=True)
-    embed.add_field(name="解決済み 🟢", value=f"**{resolved}** 件", inline=True)
-    embed.add_field(name="却下 ⚪", value=f"**{rejected}** 件", inline=True)
-    await interaction.followup.send(embed=embed, ephemeral=True)
+# @report_manage_group.command(name="stats", description="報告の統計情報を表示します。")
+# async def stats(interaction: discord.Interaction):
+#     await interaction.response.defer(ephemeral=True)
+#     stats_data = await db.get_report_stats()
+#     total = sum(stats_data.values())
+#     embed = discord.Embed(title="📈 報告統計", description=f"総報告数: **{total}** 件", color=discord.Color.purple())
+#     unhandled = stats_data.get('未対応', 0)
+#     in_progress = stats_data.get('対応中', 0)
+#     resolved = stats_data.get('解決済み', 0)
+#     rejected = stats_data.get('却下', 0)
+#     embed.add_field(name="未対応 🔴", value=f"**{unhandled}** 件", inline=True)
+#     embed.add_field(name="対応中 🟡", value=f"**{in_progress}** 件", inline=True)
+#     embed.add_field(name="解決済み 🟢", value=f"**{resolved}** 件", inline=True)
+#     embed.add_field(name="却下 ⚪", value=f"**{rejected}** 件", inline=True)
+#     await interaction.followup.send(embed=embed, ephemeral=True)
 
 # /kanrinin set サブグループを作成
-kanrinin_set_group = app_commands.Group(name="set", description="各種設定を行います。", parent=report_manage_group)
+# kanrinin_set_group = app_commands.Group(name="set", description="各種設定を行います。", parent=report_manage_group)
 
-@kanrinin_set_group.command(name="channel", description="【管理者用】指定したチャンネルに報告用フォームを設置します。")
-@app_commands.checks.has_permissions(administrator=True)
-@app_commands.describe(channel="報告フォームを設置するチャンネル")
-async def set_channel(interaction: discord.Interaction, channel: discord.TextChannel):
-    """指定したチャンネルに報告用ボタンを設置するコマンド"""
-    await interaction.response.defer(ephemeral=True)
-    
-    # ボットがメッセージを送信する権限があるかチェック
-    if not channel.permissions_for(interaction.guild.me).send_messages:
-        await interaction.followup.send(f"❌ {channel.mention} にメッセージを送信する権限がありません。", ephemeral=True)
-        return
-    
-    try:
-        # 既存のボタンメッセージを探す（新しいメッセージを無限に作らないように）
-        async for message in channel.history(limit=50):
-            if message.author == client.user and message.embeds:
-                embed = message.embeds[0]
-                if embed.title and "報告システム" in embed.title:
-                    # 既存のボタンメッセージがあるので、新しく作らない
-                    await interaction.followup.send(
-                        f"⚠️ {channel.mention} には既に報告ボタンが設置されています。\n"
-                        f"**既存メッセージID:** {message.id}",
-                        ephemeral=True
-                    )
-                    return
-        
-        # 新しい報告ボタンメッセージを作成
-        embed = discord.Embed(
-            title="🛡️ 守護神ボット 報告システム",
-            description="サーバーのルール違反を匿名で管理者に報告できます。\n下のボタンをクリックして報告を開始してください。",
-            color=discord.Color.blue()
-        )
-        embed.add_field(
-            name="📋 報告の流れ", 
-            value="① 報告開始ボタンをクリック\n② 対象者を選択\n③ 違反ルールを選択\n④ 緊急度を選択\n⑤ 詳細情報を入力\n⑥ 最終確認・送信", 
-            inline=False
-        )
-        embed.set_footer(text="報告は完全に匿名で処理されます")
-        
-        view = ReportStartView()
-        sent_message = await channel.send(embed=embed, view=view)
-        
-        await interaction.followup.send(
-            f"✅ 報告フォームを {channel.mention} に設置しました。\n"
-            f"**メッセージID:** {sent_message.id}\n"
-            f"**チャンネルID:** {channel.id}", 
-            ephemeral=True
-        )
-        
-        # 設置されたチャンネルIDをログに出力
-        logging.info(f"報告フォームを設置: チャンネル={channel.name}({channel.id})")
-        
-    except discord.Forbidden:
-        await interaction.followup.send(f"❌ {channel.mention} にメッセージを送信する権限がありません。", ephemeral=True)
-    except Exception as e:
-        logging.error(f"フォーム設置エラー: {e}")
-        await interaction.followup.send(f"❌ 報告フォームの設置に失敗しました: {e}", ephemeral=True)
+# @kanrinin_set_group.command(name="channel", description="【管理者用】指定したチャンネルに報告用フォームを設置します。")
+# @app_commands.checks.has_permissions(administrator=True)
+# @app_commands.describe(channel="報告フォームを設置するチャンネル")
+# async def set_channel(interaction: discord.Interaction, channel: discord.TextChannel):
+#     """指定したチャンネルに報告用ボタンを設置するコマンド"""
+#     await interaction.response.defer(ephemeral=True)
+#     
+#     # ボットがメッセージを送信する権限があるかチェック
+#     if not channel.permissions_for(interaction.guild.me).send_messages:
+#         await interaction.followup.send(f"❌ {channel.mention} にメッセージを送信する権限がありません。", ephemeral=True)
+#         return
+#     
+#     try:
+#         # 既存のボタンメッセージを探す（新しいメッセージを無限に作らないように）
+#         async for message in channel.history(limit=50):
+#             if message.author == client.user and message.embeds:
+#                 embed = message.embeds[0]
+#                 if embed.title and "報告システム" in embed.title:
+#                     # 既存のボタンメッセージがあるので、新しく作らない
+#                     await interaction.followup.send(
+#                         f"⚠️ {channel.mention} には既に報告ボタンが設置されています。\n"
+#                         f"**既存メッセージID:** {message.id}",
+#                         ephemeral=True
+#                     )
+#                     return
+#         
+#         # 新しい報告ボタンメッセージを作成
+#         embed = discord.Embed(
+#             title="🛡️ 守護神ボット 報告システム",
+#             description="サーバーのルール違反を匿名で管理者に報告できます。\n下のボタンをクリックして報告を開始してください。",
+#             color=discord.Color.blue()
+#         )
+#         embed.add_field(
+#             name="📋 報告の流れ", 
+#             value="① 報告開始ボタンをクリック\n② 対象者を選択\n③ 違反ルールを選択\n④ 緊急度を選択\n⑤ 詳細情報を入力\n⑥ 最終確認・送信", 
+#             inline=False
+#         )
+#         embed.set_footer(text="報告は完全に匿名で処理されます")
+#         
+#         view = ReportStartView()
+#         sent_message = await channel.send(embed=embed, view=view)
+#         
+#         await interaction.followup.send(
+#             f"✅ 報告フォームを {channel.mention} に設置しました。\n"
+#             f"**メッセージID:** {sent_message.id}\n"
+#             f"**チャンネルID:** {channel.id}", 
+#             ephemeral=True
+#         )
+#         
+#         # 設置されたチャンネルIDをログに出力
+#         logging.info(f"報告フォームを設置: チャンネル={channel.name}({channel.id})")
+#         
+#     except discord.Forbidden:
+#         await interaction.followup.send(f"❌ {channel.mention} にメッセージを送信する権限がありません。", ephemeral=True)
+#     except Exception as e:
+#         logging.error(f"フォーム設置エラー: {e}")
+#         await interaction.followup.send(f"❌ 報告フォームの設置に失敗しました: {e}", ephemeral=True)
 
-@set_channel.error
-async def set_channel_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
-    if isinstance(error, app_commands.MissingPermissions):
-        await interaction.response.send_message("このコマンドはサーバーの管理者のみが実行できます。", ephemeral=True)
-    else:
-        await interaction.response.send_message(f"フォーム設置中にエラーが発生しました: {error}", ephemeral=True)
+# @set_channel.error
+# async def set_channel_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+#     if isinstance(error, app_commands.MissingPermissions):
+#         await interaction.response.send_message("このコマンドはサーバーの管理者のみが実行できます。", ephemeral=True)
+#     else:
+#         await interaction.response.send_message(f"フォーム設置中にエラーが発生しました: {error}", ephemeral=True)
 
-@kanrinin_set_group.command(name="reportchannel", description="【管理者用】匿名報告の送信先チャンネルを設定します。")
-@app_commands.checks.has_permissions(administrator=True)
-@app_commands.describe(
-    report_channel="匿名報告が送信されるチャンネル",
-    urgent_role="緊急度「高」の際にメンションするロール（任意）"
-)
-async def set_reportchannel(interaction: discord.Interaction, report_channel: discord.TextChannel, urgent_role: discord.Role = None):
-    """匿名報告の送信先チャンネルを設定するコマンド"""
-    await interaction.response.defer(ephemeral=True)
-    
-    # ボットがメッセージを送信する権限があるかチェック
-    if not report_channel.permissions_for(interaction.guild.me).send_messages:
-        await interaction.followup.send(f"❌ {report_channel.mention} にメッセージを送信する権限がありません。", ephemeral=True)
-        return
-    
-    try:
-        role_id = urgent_role.id if urgent_role else None
-        await db.setup_guild(interaction.guild.id, report_channel.id, role_id)
-        role_mention = urgent_role.mention if urgent_role else "未設定"
-        
-        await interaction.followup.send(
-            f"✅ 報告先チャンネルを設定しました。\n"
-            f"**報告先チャンネル:** {report_channel.mention}\n"
-            f"**緊急メンション用ロール:** {role_mention}",
-            ephemeral=True
-        )
-        
-        # 設定をログに出力
-        logging.info(f"報告先チャンネルを設定: チャンネル={report_channel.name}({report_channel.id}), 緊急ロール={urgent_role.name if urgent_role else 'なし'}")
-        
-    except Exception as e:
-        logging.error(f"報告先チャンネル設定エラー: {e}")
-        await interaction.followup.send(f"❌ 報告先チャンネルの設定に失敗しました: {e}", ephemeral=True)
+# @kanrinin_set_group.command(name="reportchannel", description="【管理者用】匿名報告の送信先チャンネルを設定します。")
+# @app_commands.checks.has_permissions(administrator=True)
+# @app_commands.describe(
+#     report_channel="匿名報告が送信されるチャンネル",
+#     urgent_role="緊急度「高」の際にメンションするロール（任意）"
+# )
+# async def set_reportchannel(interaction: discord.Interaction, report_channel: discord.TextChannel, urgent_role: discord.Role = None):
+#     """匿名報告の送信先チャンネルを設定するコマンド"""
+#     await interaction.response.defer(ephemeral=True)
+#     
+#     # ボットがメッセージを送信する権限があるかチェック
+#     if not report_channel.permissions_for(interaction.guild.me).send_messages:
+#         await interaction.followup.send(f"❌ {report_channel.mention} にメッセージを送信する権限がありません。", ephemeral=True)
+#         return
+#     
+#     try:
+#         role_id = urgent_role.id if urgent_role else None
+#         await db.setup_guild(interaction.guild.id, report_channel.id, role_id)
+#         role_mention = urgent_role.mention if urgent_role else "未設定"
+#         
+#         await interaction.followup.send(
+#             f"✅ 報告先チャンネルを設定しました。\n"
+#             f"**報告先チャンネル:** {report_channel.mention}\n"
+#             f"**緊急メンション用ロール:** {role_mention}",
+#             ephemeral=True
+#         )
+#         
+#         # 設定をログに出力
+#         logging.info(f"報告先チャンネルを設定: チャンネル={report_channel.name}({report_channel.id}), 緊急ロール={urgent_role.name if urgent_role else 'なし'}")
+#         
+#     except Exception as e:
+#         logging.error(f"報告先チャンネル設定エラー: {e}")
+#         await interaction.followup.send(f"❌ 報告先チャンネルの設定に失敗しました: {e}", ephemeral=True)
 
-@set_reportchannel.error
-async def set_reportchannel_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
-    if isinstance(error, app_commands.MissingPermissions):
-        await interaction.response.send_message("このコマンドはサーバーの管理者のみが実行できます。", ephemeral=True)
-    else:
-        await interaction.response.send_message(f"報告先チャンネル設定中にエラーが発生しました: {error}", ephemeral=True)
+# @set_reportchannel.error
+# async def set_reportchannel_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+#     if isinstance(error, app_commands.MissingPermissions):
+#         await interaction.response.send_message("このコマンドはサーバーの管理者のみが実行できます。", ephemeral=True)
+#     else:
+#         await interaction.response.send_message(f"報告先チャンネル設定中にエラーが発生しました: {error}", ephemeral=True)
 
 
 # --- 起動処理 ---
 def main():
-    tree.add_command(report_manage_group)
+    # tree.add_command(report_manage_group)  # 一時的に非表示
     flask_thread = threading.Thread(target=run_flask)
     flask_thread.start()
     client.run(TOKEN)
