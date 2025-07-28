@@ -622,20 +622,20 @@ class FinalConfirmView(ui.View):
 # ★★★★★★★ 直接報告コマンド ★★★★★★★
 @tree.command(name="syugoshin", description="サーバーのルール違反を匿名で管理者に報告します。")
 @app_commands.describe(
-    target_user="① 報告したい相手を選んでね",
-    violated_rule="② 違反したルールを選んでね",
-    urgency="③ 緊急度を選んでね",
-    details="④ 何があったか詳しく教えてください（『その他』を選んだ場合は必ず書いてください）",
+    user="① 報告したい相手を選んでね",
+    rule="② 違反したルールを選んでね",
+    speed="③ 緊急度を選んでね",
+    info="④ どんなことがあったか、くわしく書いてください（『その他』を選んだときは必ず書いてね）",
     message_link="⑤ 問題のあったメッセージのリンクがあれば貼ってください"
 )
 @app_commands.choices(
-    violated_rule=[
+    rule=[
         app_commands.Choice(name="そのいち：ひとのいやがること・傷つくことはしない 🟥", value="そのいち：ひとのいやがること・傷つくことはしない 🟥"),
         app_commands.Choice(name="そのに：かってにフレンドにならない 🤝", value="そのに：かってにフレンドにならない 🤝"),
         app_commands.Choice(name="そのさん：くすりのなまえはかきません 💊", value="そのさん：くすりのなまえはかきません 💊"),
         app_commands.Choice(name="その他：上記以外の違反", value="その他"),
     ],
-    urgency=[
+    speed=[
         app_commands.Choice(name="低：通常の違反報告", value="低"),
         app_commands.Choice(name="中：早めの対応が必要", value="中"),
         app_commands.Choice(name="高：即座の対応が必要", value="高"),
@@ -643,10 +643,10 @@ class FinalConfirmView(ui.View):
 )
 async def report(
     interaction: discord.Interaction,
-    target_user: discord.User,
-    violated_rule: app_commands.Choice[str],
-    urgency: app_commands.Choice[str],
-    details: str = None,
+    user: discord.User,
+    rule: app_commands.Choice[str],
+    speed: app_commands.Choice[str],
+    info: str = None,
     message_link: str = None
 ):
     await interaction.response.defer(ephemeral=True)
@@ -664,7 +664,7 @@ async def report(
     
     try:
         report_id = await db.create_report(
-            interaction.guild.id, target_user.id, violated_rule.value, details, message_link, urgency.value
+            interaction.guild.id, user.id, rule.value, info, message_link, speed.value
         )
         
         report_channel = client.get_channel(settings['report_channel_id'])
@@ -673,10 +673,10 @@ async def report(
         title_prefix = "📝"
         content = None
 
-        if urgency.value == "中":
+        if speed.value == "中":
             embed_color = discord.Color.orange()
             title_prefix = "⚠️"
-        elif urgency.value == "高":
+        elif speed.value == "高":
             embed_color = discord.Color.red()
             title_prefix = "🚨"
             if settings.get('urgent_role_id'):
@@ -684,10 +684,10 @@ async def report(
                 if role: content = f"{role.mention} 緊急の報告です！"
         
         embed = discord.Embed(title=f"{title_prefix} 新規の匿名報告 (ID: {report_id})", color=embed_color)
-        embed.add_field(name="👤 報告対象者", value=f"{target_user.mention} ({target_user.id})", inline=False)
-        embed.add_field(name="📜 違反したルール", value=violated_rule.value, inline=False)
-        embed.add_field(name="🔥 緊急度", value=urgency.value, inline=False)
-        if details: embed.add_field(name="📝 詳細", value=details, inline=False)
+        embed.add_field(name="👤 報告対象者", value=f"{user.mention} ({user.id})", inline=False)
+        embed.add_field(name="📜 違反したルール", value=rule.value, inline=False)
+        embed.add_field(name="🔥 緊急度", value=speed.value, inline=False)
+        if info: embed.add_field(name="📝 詳細", value=info, inline=False)
         if message_link: embed.add_field(name="🔗 関連メッセージ", value=message_link, inline=False)
         embed.add_field(name="📊 ステータス", value="未対応", inline=False)
         embed.set_footer(text="この報告は匿名で送信されました。")
