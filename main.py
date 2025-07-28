@@ -160,7 +160,7 @@ class ReportStartView(ui.View):
                 value="セレクトメニューに目的のユーザーが表示されない場合は、「🔍 ユーザーを検索」ボタンをご利用ください。",
                 inline=False
             )
-            embed.set_footer(text="ステップ 1/5 | 30秒でタイムアウトします")
+            embed.set_footer(text="ステップ 1/5 | 5分でタイムアウトします")
             
             await interaction.followup.send(embed=embed, view=view, ephemeral=True)
             
@@ -181,7 +181,7 @@ class ReportData:
 class TargetUserSelectView(ui.View):
     """対象ユーザー選択用のView"""
     def __init__(self, report_data: ReportData):
-        super().__init__(timeout=30)
+        super().__init__(timeout=300)  # 5分に延長
         self.report_data = report_data
 
     @ui.select(
@@ -220,9 +220,10 @@ class UserInputModal(ui.Modal):
 
     user_input = ui.TextInput(
         label="報告対象者",
-        placeholder="ユーザー名、表示名、@メンション、またはユーザーIDを入力",
+        placeholder="ユーザー名、表示名、@メンション、またはユーザーIDを入力してください",
         required=True,
-        max_length=100
+        max_length=200,
+        style=discord.TextStyle.short
     )
 
     async def on_submit(self, interaction: discord.Interaction):
@@ -251,40 +252,55 @@ class UserInputModal(ui.Modal):
                 except discord.NotFound:
                     pass
             
-            # 3. ユーザー名や表示名で検索
+            # 3. ユーザー名や表示名で検索（改善版）
             if not target_user:
                 guild = interaction.guild
-                search_term = user_input_text.lower()
+                search_term = user_input_text.strip()  # 前後の空白を削除
+                search_term_lower = search_term.lower()
                 
                 # 候補者を格納するリスト
-                exact_matches = []    # 完全一致
-                partial_matches = []  # 部分一致
+                exact_matches = []      # 完全一致
+                startswith_matches = [] # 前方一致
+                partial_matches = []    # 部分一致
                 
                 # サーバーメンバーから検索
                 for member in guild.members:
+                    # ボット除外
+                    if member.bot:
+                        continue
+                        
                     member_name = member.name.lower()
                     member_display = member.display_name.lower()
                     
-                    # 完全一致チェック（優先度最高）
-                    if member_name == search_term or member_display == search_term:
+                    # 完全一致チェック（最優先）
+                    if (member_name == search_term_lower or 
+                        member_display == search_term_lower or
+                        member.name == search_term or
+                        member.display_name == search_term):
                         exact_matches.append(member)
                         continue
                     
-                    # 部分一致チェック
-                    if (search_term in member_name or 
-                        search_term in member_display or
-                        member_name.startswith(search_term) or
-                        member_display.startswith(search_term)):
+                    # 前方一致チェック（2番目の優先度）
+                    if (member_name.startswith(search_term_lower) or 
+                        member_display.startswith(search_term_lower)):
+                        startswith_matches.append(member)
+                        continue
+                    
+                    # 部分一致チェック（3番目の優先度）
+                    if (search_term_lower in member_name or 
+                        search_term_lower in member_display):
                         partial_matches.append(member)
                 
-                # 結果の選択（完全一致 > 部分一致の順）
+                # 結果の選択（完全一致 > 前方一致 > 部分一致の順）
                 if exact_matches:
                     target_user = exact_matches[0]
+                elif startswith_matches:
+                    target_user = startswith_matches[0]
                 elif partial_matches:
                     target_user = partial_matches[0]
                 
                 # デバッグ情報をログに出力
-                logging.info(f"ユーザー検索: '{user_input_text}' -> 完全一致:{len(exact_matches)}件, 部分一致:{len(partial_matches)}件")
+                logging.info(f"ユーザー検索: '{user_input_text}' -> 完全一致:{len(exact_matches)}件, 前方一致:{len(startswith_matches)}件, 部分一致:{len(partial_matches)}件")
             
             if target_user:
                 self.report_data.target_user = target_user
@@ -309,20 +325,40 @@ class UserInputModal(ui.Modal):
                 # Intent設定の確認
                 intents_status = f"members:{client.intents.members}, guilds:{client.intents.guilds}"
                 
-                # 類似ユーザー名を探す（最大5件）
+                # 類似ユーザー名を探す（最大10件、改善版）
                 similar_users = []
-                search_term = user_input_text.lower()
+                search_term_lower = user_input_text.lower().strip()
                 
+                # 検索候補を作成
+                candidates = []
                 for member in member_list:
+                    if member.bot:  # ボットを除外
+                        continue
+                        
                     member_name = member.name.lower()
                     member_display = member.display_name.lower()
                     
-                    # より緩い条件で類似ユーザーを検索
-                    if (any(char in member_name for char in search_term) or 
-                        any(char in member_display for char in search_term)):
-                        similar_users.append(f"• {member.display_name} (@{member.name})")
-                        if len(similar_users) >= 5:
-                            break
+                    # より柔軟な類似検索
+                    similarity_score = 0
+                    
+                    # 部分一致のスコア計算
+                    for term_char in search_term_lower:
+                        if term_char in member_name:
+                            similarity_score += 1
+                        if term_char in member_display:
+                            similarity_score += 1
+                    
+                    # 前方一致ボーナス
+                    if member_name.startswith(search_term_lower[:2]) or member_display.startswith(search_term_lower[:2]):
+                        similarity_score += 5
+                    
+                    if similarity_score > 0:
+                        candidates.append((similarity_score, member))
+                
+                # スコア順でソートして上位10件を取得
+                candidates.sort(key=lambda x: x[0], reverse=True)
+                for score, member in candidates[:10]:
+                    similar_users.append(f"• {member.display_name} (@{member.name}) - ID: {member.id}")
                 
                 error_message = f"❌ 「{user_input_text}」に一致するユーザーが見つかりませんでした。\n\n"
                 error_message += f"**サーバー診断:**\n"
@@ -344,10 +380,11 @@ class UserInputModal(ui.Modal):
                     error_message += "**類似するユーザー名:**\n" + "\n".join(similar_users) + "\n\n"
                 
                 error_message += ("**検索のコツ:**\n"
-                                "• 正確なユーザー名を入力してください\n"
-                                "• ニックネーム（表示名）も検索対象です\n"
-                                "• ユーザーIDを使用してください\n"
-                                "• @メンションをコピーして貼り付けてください\n"
+                                "• 日本語のユーザー名も正しく検索できます\n"
+                                "• ユーザー名の一部だけでも検索可能です\n"
+                                "• 表示名（ニックネーム）も検索対象です\n"
+                                "• ユーザーIDを直接入力することもできます\n"
+                                "• @メンションをコピーして貼り付けることもできます\n"
                                 "• そのユーザーがこのサーバーのメンバーか確認してください")
                 
                 await interaction.followup.send(error_message, ephemeral=True)
@@ -359,7 +396,7 @@ class UserInputModal(ui.Modal):
 class RuleSelectView(ui.View):
     """ルール選択用のView"""
     def __init__(self, report_data: ReportData):
-        super().__init__(timeout=60)
+        super().__init__(timeout=300)  # 5分に延長
         self.report_data = report_data
 
     @ui.select(
@@ -408,7 +445,7 @@ class RuleSelectView(ui.View):
 class UrgencySelectView(ui.View):
     """緊急度選択用のView"""
     def __init__(self, report_data: ReportData):
-        super().__init__(timeout=60)
+        super().__init__(timeout=300)  # 5分に延長
         self.report_data = report_data
 
     @ui.select(
@@ -456,7 +493,7 @@ class UrgencySelectView(ui.View):
 class WarningSelectView(ui.View):
     """警告発行選択用のView"""
     def __init__(self, report_data: ReportData):
-        super().__init__(timeout=60)
+        super().__init__(timeout=300)  # 5分に延長
         self.report_data = report_data
 
     @ui.button(label="はい、警告を発行する", style=discord.ButtonStyle.danger, emoji="⚠️")
@@ -529,7 +566,7 @@ class DetailsInputModal(ui.Modal):
 class FinalConfirmView(ui.View):
     """最終確認用のView"""
     def __init__(self, report_data: ReportData):
-        super().__init__(timeout=60)
+        super().__init__(timeout=300)  # 5分に延長
         self.report_data = report_data
 
     @ui.button(label="📤 報告を送信する", style=discord.ButtonStyle.success, emoji="✅")
