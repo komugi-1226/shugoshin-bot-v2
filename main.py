@@ -16,6 +16,8 @@ logging.basicConfig(level=logging.INFO)
 TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 COOLDOWN_MINUTES = 5 # クールダウン時間（分）
 REPORT_BUTTON_CHANNEL_ID = 1399405974841852116  # ボタン式報告専用チャンネルID（変更したい場合はここを修正）
+WARNING_CHANNEL_ID = 1399405974841852116  # 警告発行時の報告先チャンネルID
+ADMIN_ONLY_CHANNEL_ID = 1388167902808637580  # 管理者のみ報告時のチャンネルID
 
 # --- Discord Botの準備 ---
 intents = discord.Intents.default()
@@ -442,6 +444,16 @@ class RuleSelectView(ui.View):
         
         await interaction.response.edit_message(embed=embed, view=view)
 
+    @ui.button(label="❌ キャンセル", style=discord.ButtonStyle.danger, row=1)
+    async def cancel_report(self, interaction: discord.Interaction, button: ui.Button):
+        """報告をキャンセルする"""
+        embed = discord.Embed(
+            title="❌ 報告をキャンセルしました",
+            description="報告はキャンセルされました。",
+            color=discord.Color.red()
+        )
+        await interaction.response.edit_message(embed=embed, view=None)
+
 class UrgencySelectView(ui.View):
     """緊急度選択用のView"""
     def __init__(self, report_data: ReportData):
@@ -490,6 +502,16 @@ class UrgencySelectView(ui.View):
         
         await interaction.response.edit_message(embed=embed, view=view)
 
+    @ui.button(label="❌ キャンセル", style=discord.ButtonStyle.danger, row=1)
+    async def cancel_report(self, interaction: discord.Interaction, button: ui.Button):
+        """報告をキャンセルする"""
+        embed = discord.Embed(
+            title="❌ 報告をキャンセルしました",
+            description="報告はキャンセルされました。",
+            color=discord.Color.red()
+        )
+        await interaction.response.edit_message(embed=embed, view=None)
+
 class WarningSelectView(ui.View):
     """警告発行選択用のView"""
     def __init__(self, report_data: ReportData):
@@ -505,6 +527,16 @@ class WarningSelectView(ui.View):
     async def no_warning(self, interaction: discord.Interaction, button: ui.Button):
         self.report_data.issue_warning = False
         await self._proceed_to_details(interaction)
+
+    @ui.button(label="❌ キャンセル", style=discord.ButtonStyle.danger, row=1)
+    async def cancel_report(self, interaction: discord.Interaction, button: ui.Button):
+        """報告をキャンセルする"""
+        embed = discord.Embed(
+            title="❌ 報告をキャンセルしました",
+            description="報告はキャンセルされました。",
+            color=discord.Color.red()
+        )
+        await interaction.response.edit_message(embed=embed, view=None)
 
     async def _proceed_to_details(self, interaction: discord.Interaction):
         """詳細入力ステップへ進む"""
@@ -574,10 +606,14 @@ class FinalConfirmView(ui.View):
         await interaction.response.defer(ephemeral=True)
         
         try:
-            # 報告を送信（既存のreportコマンドのロジックを再利用）
-            settings = await db.get_guild_settings(interaction.guild.id)
-            if not settings or not settings.get('report_channel_id'):
-                await interaction.followup.send("❌ ボットの初期設定が完了していません。管理者に連絡してください。", ephemeral=True)
+            # 報告チャンネルを警告発行の有無で分岐
+            if self.report_data.issue_warning:
+                report_channel = client.get_channel(WARNING_CHANNEL_ID)
+            else:
+                report_channel = client.get_channel(ADMIN_ONLY_CHANNEL_ID)
+            
+            if not report_channel:
+                await interaction.followup.send("❌ 報告先チャンネルが見つかりません。管理者に連絡してください。", ephemeral=True)
                 return
 
             report_id = await db.create_report(
@@ -588,8 +624,6 @@ class FinalConfirmView(ui.View):
                 self.report_data.message_link, 
                 self.report_data.urgency
             )
-            
-            report_channel = client.get_channel(settings['report_channel_id'])
             
             # 埋め込みの色と絵文字を設定
             embed_color = discord.Color.greyple()
@@ -602,15 +636,17 @@ class FinalConfirmView(ui.View):
             elif self.report_data.urgency == "高":
                 embed_color = discord.Color.red()
                 title_prefix = "🚨"
-                if settings.get('urgent_role_id'):
-                    role = interaction.guild.get_role(settings['urgent_role_id'])
-                    if role: 
-                        content = f"{role.mention} 緊急の報告です！"
+                # 緊急時のロールメンションは設定から取得（将来的に設定可能にする場合のため）
+                # content = f"@everyone 緊急の報告です！"  # 必要に応じてコメントアウト解除
+            
+            # 報告種別を表示に追加
+            report_type = "警告付き報告" if self.report_data.issue_warning else "管理者のみ報告"
             
             embed = discord.Embed(title=f"{title_prefix} 新規の匿名報告 (ID: {report_id})", color=embed_color)
             embed.add_field(name="👤 報告対象者", value=f"{self.report_data.target_user.mention} ({self.report_data.target_user.id})", inline=False)
             embed.add_field(name="📜 違反したルール", value=self.report_data.violated_rule, inline=False)
             embed.add_field(name="🔥 緊急度", value=self.report_data.urgency, inline=False)
+            embed.add_field(name="📋 報告種別", value=report_type, inline=False)
             if self.report_data.details: 
                 embed.add_field(name="📝 詳細", value=self.report_data.details, inline=False)
             if self.report_data.message_link: 
@@ -621,7 +657,7 @@ class FinalConfirmView(ui.View):
             sent_message = await report_channel.send(content=content, embed=embed)
             await db.update_report_message_id(report_id, sent_message.id)
 
-            # 警告を発行する場合
+            # 警告を発行する場合（警告チャンネルでのみ実行）
             if self.report_data.issue_warning:
                 warning_message = (
                     f"{self.report_data.target_user.mention}\n\n"
@@ -645,11 +681,11 @@ class FinalConfirmView(ui.View):
             logging.error(f"ボタン式報告処理中にエラー: {e}", exc_info=True)
             await interaction.followup.send(f"❌ 報告の送信中にエラーが発生しました: {e}", ephemeral=True)
 
-    @ui.button(label="❌ キャンセル", style=discord.ButtonStyle.secondary)
+    @ui.button(label="❌ キャンセル", style=discord.ButtonStyle.danger, row=1)
     async def cancel_report(self, interaction: discord.Interaction, button: ui.Button):
         embed = discord.Embed(
             title="❌ 報告をキャンセルしました",
-            description="報告は送信されませんでした。",
+            description="報告はキャンセルされました。",
             color=discord.Color.red()
         )
         await interaction.response.edit_message(embed=embed, view=None)
