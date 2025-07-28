@@ -366,34 +366,22 @@ class RuleSelectView(ui.View):
         placeholder="違反したルールを選択してください",
         options=[
             discord.SelectOption(
-                label="そのいち：ひとをきずつけない",
-                description="他者への攻撃的な発言や行動",
-                emoji="💔",
-                value="そのいち：ひとをきずつけない 💔"
+                label="そのいち：ひとのいやがること・傷つくことはしない",
+                description="侮辱・差別・暴言・しつこいDM等",
+                emoji="🟥",
+                value="そのいち：ひとのいやがること・傷つくことはしない 🟥"
             ),
             discord.SelectOption(
-                label="そのに：ひとのいやがることをしない",
-                description="迷惑行為やハラスメント",
-                emoji="🚫",
-                value="そのに：ひとのいやがることをしない 🚫"
+                label="そのに：かってにフレンドにならない",
+                description="フレンド申請は相手の同意が必須",
+                emoji="🤝",
+                value="そのに：かってにフレンドにならない 🤝"
             ),
             discord.SelectOption(
-                label="そのさん：かってにフレンドにならない",
-                description="無断でのフレンド申請や個人情報の要求",
-                emoji="👥",
-                value="そのさん：かってにフレンドにならない 👥"
-            ),
-            discord.SelectOption(
-                label="そのよん：くすりのなまえはかきません",
-                description="薬物に関する不適切な発言",
+                label="そのさん：くすりのなまえはかきません",
+                description="薬の名前を書く・口に出すのは避ける",
                 emoji="💊",
-                value="そのよん：くすりのなまえはかきません 💊"
-            ),
-            discord.SelectOption(
-                label="そのご：あきらかなせんでんこういはしません",
-                description="宣伝や営利活動",
-                emoji="📢",
-                value="そのご：あきらかなせんでんこういはしません 📢"
+                value="そのさん：くすりのなまえはかきません 💊"
             ),
             discord.SelectOption(
                 label="その他の違反",
@@ -846,11 +834,9 @@ async def debug_members_error(interaction: discord.Interaction, error: app_comma
 )
 @app_commands.choices(
     violated_rule=[
-        app_commands.Choice(name="そのいち：ひとをきずつけない 💔", value="そのいち：ひとをきずつけない 💔"),
-        app_commands.Choice(name="そのに：ひとのいやがることをしない 🚫", value="そのに：ひとのいやがることをしない 🚫"),
-        app_commands.Choice(name="そのさん：かってにフレンドにならない 👥", value="そのさん：かってにフレンドにならない 👥"),
-        app_commands.Choice(name="そのよん：くすりのなまえはかきません 💊", value="そのよん：くすりのなまえはかきません 💊"),
-        app_commands.Choice(name="そのご：あきらかなせんでんこういはしません 📢", value="そのご：あきらかなせんでんこういはしません 📢"),
+        app_commands.Choice(name="そのいち：ひとのいやがること・傷つくことはしない 🟥", value="そのいち：ひとのいやがること・傷つくことはしない 🟥"),
+        app_commands.Choice(name="そのに：かってにフレンドにならない 🤝", value="そのに：かってにフレンドにならない 🤝"),
+        app_commands.Choice(name="そのさん：くすりのなまえはかきません 💊", value="そのさん：くすりのなまえはかきません 💊"),
         app_commands.Choice(name="その他：上記以外の違反", value="その他"),
     ],
     urgency=[
