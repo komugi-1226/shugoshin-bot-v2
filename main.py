@@ -18,6 +18,7 @@ COOLDOWN_MINUTES = 5 # クールダウン時間（分）
 REPORT_BUTTON_CHANNEL_ID = 1399405974841852116  # ボタン式報告専用チャンネルID（変更したい場合はここを修正）
 WARNING_CHANNEL_ID = 1399405974841852116  # 警告発行時の報告先チャンネルID
 ADMIN_ONLY_CHANNEL_ID = 1388167902808637580  # 管理者のみ報告時のチャンネルID
+RULE_ANNOUNCEMENT_LINK = "https://discord.com/channels/1300291307314610316/1377465336076566578"  # ルールアナウンスチャンネルのリンク
 
 # --- Discord Botの準備 ---
 intents = discord.Intents.default()
@@ -664,7 +665,7 @@ class FinalConfirmView(ui.View):
                     f"⚠️ **サーバー管理者からのお知らせです** ⚠️\n"
                     f"━━━━━━━━━━━━━━━━━━━━━━\n"
                     f"あなたの行動について、サーバーのルールに関する報告が寄せられました。\n\n"
-                    f"**該当ルール:** {self.report_data.violated_rule}\n\n"
+                    f"**該当ルール:** [✅ルールアナウンスチャンネル](<{RULE_ANNOUNCEMENT_LINK}>)\n\n"
                     f"みんなが楽しく過ごせるよう、今一度ルールの確認をお願いいたします。\n"
                     f"ご不明な点があれば、このチャンネルで返信するか、管理者にDMを送ってください。\n"
                     f"━━━━━━━━━━━━━━━━━━━━━━"
