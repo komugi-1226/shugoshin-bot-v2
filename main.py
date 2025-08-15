@@ -78,26 +78,58 @@ async def setup_report_button():
                     return
         
         # 新しい報告ボタンメッセージを作成
-        embed = discord.Embed(
-            title="🛡️ 守護神ボット 報告システム",
-            description="サーバーのルール違反を匿名で管理者に報告できます。\n下のボタンをクリックして報告を開始してください。",
-            color=discord.Color.blue()
-        )
-        embed.add_field(
-            name="📋 報告の流れ", 
-            value="① 報告開始ボタンをクリック\n② 対象者を選択\n③ 違反ルールを選択\n④ 緊急度を選択\n⑤ 詳細情報を入力\n⑥ 最終確認・送信", 
-            inline=False
-        )
-        embed.set_footer(text="報告は完全に匿名で処理されます")
-        
-        view = ReportStartView()
-        sent_message = await channel.send(embed=embed, view=view)
-        logging.info(f"報告用ボタンを設置しました (メッセージID: {sent_message.id})")
+        await create_new_report_button(channel)
         
     except discord.Forbidden:
         logging.error(f"チャンネルID {REPORT_BUTTON_CHANNEL_ID} にメッセージを送信する権限がありません")
     except Exception as e:
         logging.error(f"報告ボタンの設置に失敗: {e}", exc_info=True)
+
+async def create_new_report_button(channel):
+    """新しい報告ボタンメッセージを作成する"""
+    embed = discord.Embed(
+        title="🛡️ 守護神ボット 報告システム",
+        description="サーバーのルール違反を匿名で管理者に報告できます。\n下のボタンをクリックして報告を開始してください。",
+        color=discord.Color.blue()
+    )
+    embed.add_field(
+        name="📋 報告の流れ", 
+        value="① 報告開始ボタンをクリック\n② 対象者を選択\n③ 違反ルールを選択\n④ 緊急度を選択\n⑤ 詳細情報を入力\n⑥ 最終確認・送信", 
+        inline=False
+    )
+    embed.set_footer(text="報告は完全に匿名で処理されます")
+    
+    view = ReportStartView()
+    sent_message = await channel.send(embed=embed, view=view)
+    logging.info(f"報告用ボタンを設置しました (メッセージID: {sent_message.id})")
+    return sent_message
+
+async def refresh_report_button():
+    """報告ボタンを最新位置に移動する（古いボタンを削除して新しいボタンを作成）"""
+    try:
+        channel = client.get_channel(REPORT_BUTTON_CHANNEL_ID)
+        if not channel:
+            return
+            
+        # 古いボタンメッセージを削除
+        async for message in channel.history(limit=100):
+            if message.author == client.user and message.embeds:
+                embed = message.embeds[0]
+                if embed.title and "報告システム" in embed.title:
+                    try:
+                        await message.delete()
+                        logging.info(f"古い報告ボタンを削除しました (ID: {message.id})")
+                    except discord.NotFound:
+                        pass  # 既に削除されている場合
+                    except discord.Forbidden:
+                        logging.error("報告ボタンの削除権限がありません")
+                    break
+        
+        # 新しいボタンメッセージを作成
+        await create_new_report_button(channel)
+        
+    except Exception as e:
+        logging.error(f"報告ボタンの更新に失敗: {e}", exc_info=True)
 
 # --- 確認ボタン付きView ---
 class ConfirmWarningView(ui.View):
@@ -665,7 +697,7 @@ class FinalConfirmView(ui.View):
                     f"⚠️ **サーバー管理者からのお知らせです** ⚠️\n"
                     f"━━━━━━━━━━━━━━━━━━━━━━\n"
                     f"あなたの行動について、サーバーのルールに関する報告が寄せられました。\n\n"
-                    f"**該当ルール:** [✅ルールアナウンスチャンネル](<{RULE_ANNOUNCEMENT_LINK}>)\n\n"
+                    f"**該当ルール:** [✅ルール](<{RULE_ANNOUNCEMENT_LINK}>)\n\n"
                     f"みんなが楽しく過ごせるよう、今一度ルールの確認をお願いいたします。\n"
                     f"ご不明な点があれば、このチャンネルで返信するか、管理者にDMを送ってください。\n"
                     f"━━━━━━━━━━━━━━━━━━━━━━"
@@ -677,6 +709,9 @@ class FinalConfirmView(ui.View):
                 final_message = "✅ 報告と警告発行を完了しました。ご協力ありがとうございます。"
 
             await interaction.followup.send(final_message, ephemeral=True)
+            
+            # 報告送信後に報告ボタンを最新位置に移動
+            await refresh_report_button()
 
         except Exception as e:
             logging.error(f"ボタン式報告処理中にエラー: {e}", exc_info=True)
@@ -772,6 +807,9 @@ async def report(
         final_message = "通報を受け付けました。ご協力ありがとうございます。"
 
         await interaction.followup.send(final_message, ephemeral=True)
+        
+        # 報告送信後に報告ボタンを最新位置に移動
+        await refresh_report_button()
 
     except Exception as e:
         logging.error(f"通報処理中にエラー: {e}", exc_info=True)
