@@ -73,7 +73,7 @@ async def setup_report_button():
             if message.author == client.user and message.embeds:
                 embed = message.embeds[0]
                 if embed.title and "報告システム" in embed.title:
-                    # 既存のボタンメッセージがあるので、新しく作らない
+                    # 既存の報告ボタンメッセージがあるので、新しく作らない
                     logging.info(f"既存の報告ボタンが見つかりました (メッセージID: {message.id})")
                     return
         
@@ -815,6 +815,52 @@ async def report(
         logging.error(f"通報処理中にエラー: {e}", exc_info=True)
         await interaction.followup.send(f"不明なエラーが発生しました: {e}", ephemeral=True)
 
+# ★★★★★★★ 管理者専用：ユーザーIDからユーザーを特定する ★★★★★★★
+@tree.command(name="whois", description="ユーザーIDからユーザーを特定します（管理者専用）")
+@app_commands.describe(user_id="調べたいユーザーのID（数字のみ）")
+@app_commands.checks.has_permissions(administrator=True)
+async def whois(interaction: discord.Interaction, user_id: str):
+    """管理者のみ使用可・結果はエフェメラルで返信"""
+    await interaction.response.defer(ephemeral=True)
+    try:
+        uid = int(user_id)
+        # ユーザー情報（グローバル）
+        user = await client.fetch_user(uid)
+
+        # サーバー内のMember情報（ニックネーム等）
+        member = interaction.guild.get_member(uid)
+        nickname = member.nick if member and member.nick else "（なし）"
+        joined = member.joined_at.strftime("%Y-%m-%d %H:%M") if member and member.joined_at else "不明"
+
+        embed = discord.Embed(
+            title="🔎 ユーザー特定結果",
+            description=f"✅ **{user}** を特定しました",
+            color=discord.Color.blue()
+        )
+        embed.add_field(name="🆔 ユーザーID", value=str(user.id), inline=False)
+        embed.add_field(name="📛 ユーザー名", value=f"{user.name}#{user.discriminator}", inline=True)
+        embed.add_field(name="🏷️ サーバー表示名（ニックネーム）", value=nickname, inline=True)
+        embed.add_field(name="👥 サーバーメンバーか", value="はい" if member else "いいえ", inline=True)
+        embed.add_field(name="📅 参加日時", value=joined, inline=True)
+        if user.avatar:
+            embed.set_thumbnail(url=user.avatar.url)
+
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+    except ValueError:
+        await interaction.followup.send("❌ IDは数字のみで入力してください。", ephemeral=True)
+    except discord.NotFound:
+        await interaction.followup.send("❌ そのIDのユーザーは見つかりませんでした。", ephemeral=True)
+    except Exception as e:
+        logging.error(f"/whois エラー: {e}", exc_info=True)
+        await interaction.followup.send(f"❌ ユーザーを取得できませんでした: {e}", ephemeral=True)
+
+@whois.error
+async def whois_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    if isinstance(error, app_commands.MissingPermissions):
+        await interaction.response.send_message("このコマンドはサーバーの**管理者のみ**が実行できます。", ephemeral=True)
+    else:
+        await interaction.response.send_message(f"エラーが発生しました: {error}", ephemeral=True)
 
 # (/kanrinin グループ - 管理者用報告管理コマンド) - 一時的に非表示
 # report_manage_group = app_commands.Group(name="kanrinin", description="報告を管理します。")
